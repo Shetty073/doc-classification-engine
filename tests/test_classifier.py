@@ -79,3 +79,20 @@ def test_heuristic_fallbacks(classifier):
     # Test Bank Statement
     statement_res = classifier._heuristic_fallback("ACCOUNT STATEMENT HDFC BANK LTD IFSC CODE HDFC0000123 CLOSING BALANCE 50000.00")
     assert statement_res.category == "BANK_STATEMENT"
+    assert statement_res.confidence_score >= 1 and statement_res.confidence_score <= 100
+
+
+def test_unknown_with_guess_and_score(classifier):
+    # Test JSON with non-standard document
+    raw_json = '{"category": "UNKNOWN", "confidence_score": 90, "guess": "Electricity / Utility Bill", "reasoning": "BESCOM power bill"}'
+    result = classifier._parse_llm_json(raw_json)
+
+    assert result.category == "UNKNOWN"
+    assert result.confidence_score == 90
+    assert result.guess == "Electricity / Utility Bill"
+
+    # Test heuristic fallback on unrecognized document with electricity terms
+    fallback_res = classifier._heuristic_fallback("BESCOM ELECTRICITY BILL KWH CONSUMER NO 12345")
+    assert fallback_res.category == "UNKNOWN"
+    assert fallback_res.confidence_score >= 1 and fallback_res.confidence_score <= 100
+    assert "Electricity" in fallback_res.guess

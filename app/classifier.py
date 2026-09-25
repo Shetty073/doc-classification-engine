@@ -58,11 +58,14 @@ OUTPUT FORMAT RULES:
 - Do NOT classify GST returns as BUSINESS_REGISTRATION; use GST_RETURN.
 - Do NOT classify Work Orders as BUSINESS_REGISTRATION; use PURCHASE_ORDER.
 - Do NOT classify Balance Sheets as BUSINESS_REGISTRATION; use AUDITED_FINANCIALS.
+- CRITICAL FOR UNKNOWN: If the document does not fit any of the 14 standard categories, set "category": "UNKNOWN", and provide a specific hypothesis in "guess" (e.g., "Electricity / Utility Bill", "Salary Slip", "Vehicle Registration / RC", "Cancelled Cheque", "Academic Marksheet", "Medical Prescription / Hospital Bill", "Courier Slip", etc.).
+- "confidence_score": An integer between 1 and 100.
 
 JSON Schema:
 {{
   "category": "CATEGORY_NAME",
-  "confidence": 0.95,
+  "confidence_score": 85,
+  "guess": "Specific hypothesis if UNKNOWN, or null if categorized",
   "reasoning": "Brief explanation identifying key terms",
   "sub_category": "Specific variant name"
 }}
@@ -81,7 +84,8 @@ class LLMClassifierService:
             cleaned_text = cleaned_text[:3000] + "\n...[TRUNCATED]...\n" + cleaned_text[-1000:]
 
         user_content = (
-            f"Analyze this Indian document OCR text and classify it into the exact category:\n\n"
+            f"Analyze this Indian document OCR text and classify it into the exact category.\n"
+            f"If it does not fit the banking taxonomy, categorize as UNKNOWN, assign a confidence_score between 1 and 100, and provide your best guess of what it is:\n\n"
             f"--- DOCUMENT OCR TEXT ---\n"
             f"{cleaned_text if cleaned_text else '[EMPTY DOCUMENT]'}\n"
             f"--- END DOCUMENT OCR TEXT ---\n"
@@ -101,7 +105,9 @@ class LLMClassifierService:
             logger.warning("OCR text is empty or too short. Defaulting to UNKNOWN.")
             return ClassificationResult(
                 category="UNKNOWN",
-                confidence=0.1,
+                confidence_score=10,
+                guess="Illegible / Blank Document",
+                confidence=0.10,
                 reasoning="Insufficient or no readable text extracted from document.",
             )
 
@@ -141,9 +147,25 @@ class LLMClassifierService:
             data = json.loads(clean_str)
 
             category = str(data.get("category", "UNKNOWN")).strip().upper()
-            confidence = float(data.get("confidence", 0.85))
+            
+            # Confidence score scaling (1 to 100)
+            raw_conf = data.get("confidence_score")
+            if raw_conf is not None:
+                try:
+                    conf_score = int(float(raw_conf))
+                except (ValueError, TypeError):
+                    conf_score = 85
+            else:
+                conf_val = float(data.get("confidence", 0.85))
+                conf_score = int(round(conf_val * 100)) if conf_val <= 1.0 else int(round(conf_val))
+
+            confidence_score = max(1, min(100, conf_score))
+            confidence_float = round(confidence_score / 100.0, 2)
+
             reasoning = str(data.get("reasoning", "LLM-classified"))
             sub_category = data.get("sub_category")
+            guess = data.get("guess")
+
             sub_cat_str = str(sub_category).upper() if sub_category else ""
             raw_upper = raw_content.upper()
             src_upper = source_text.upper()
@@ -164,46 +186,54 @@ class LLMClassifierService:
             elif "INCORPORATION" in sub_cat_str or "UDYAM" in sub_cat_str:
                 category = "BUSINESS_REGISTRATION"
 
-            valid_categories = {
-                "PASSPORT",
-                "DRIVING_LICENCE",
-                "AADHAAR_CARD",
-                "VOTER_ID",
-                "NREGA_JOB_CARD",
-                "NPR_LETTER",
-                "PAN_CARD",
-                "GST_RETURN",
-                "INCOME_TAX_RETURN",
-                "PURCHASE_ORDER",
-                "TAX_INVOICE",
-                "BANK_STATEMENT",
-                "AUDITED_FINANCIALS",
-                "BUSINESS_REGISTRATION",
-                "UNKNOWN",
-            }
+            # If the category is not in our 14 recognized banking categories, normalize to UNKNOWN
+            # and preserve the LLM's classification as the guess
+            if category not in ALLOWED_CATEGORIES:
+                if not guess or guess.strip() == "":
+                    guess = str(data.get("category", "")).replace("_", " ").title()
+                category = "UNKNOWN"
 
-            if category not in valid_categories:
-                # Attempt to normalize common variants
-                for valid_cat in valid_categories:
-                    if valid_cat in category or category in valid_cat:
-                        category = valid_cat
-                        break
-                else:
-                    category = "UNKNOWN"
+            # If UNKNOWN and no guess was given, extract a heuristic guess
+            if category == "UNKNOWN" and (not guess or guess.strip() == ""):
+                guess = self._guess_unknown_type(source_text)
 
             return ClassificationResult(
                 category=category,
-                confidence=confidence,
+                confidence_score=confidence_score,
+                guess=guess,
+                confidence=confidence_float,
                 reasoning=reasoning,
                 sub_category=sub_category,
             )
         except Exception as e:
             logger.error("Failed to parse LLM JSON: %s. Raw: %s", e, raw_content)
+            guess_val = self._guess_unknown_type(source_text)
             return ClassificationResult(
                 category="UNKNOWN",
-                confidence=0.3,
+                confidence_score=30,
+                guess=guess_val,
+                confidence=0.30,
                 reasoning=f"Failed to parse LLM response: {raw_content[:100]}",
             )
+
+    def _guess_unknown_type(self, text: str) -> str:
+        """Heuristically infers likely document type when outside RBI OVD or business taxonomy."""
+        upper = text.upper()
+        if any(w in upper for w in ["ELECTRICITY", "POWER", "DISCOM", "BESCOM", "TNEB", "KWH", "METER READING", "CONSUMER NO"]):
+            return "Electricity / Utility Bill"
+        if any(w in upper for w in ["PAYSLIP", "SALARY SLIP", "EARNINGS", "BASIC PAY", "HRA", "EMPLOYEE ID", "NET PAY"]):
+            return "Salary / Pay Slip"
+        if any(w in upper for w in ["CHASSIS", "REGISTRATION CERTIFICATE", "MOTOR VEHICLES", "INSURANCE POLICY", "POLICY NO"]):
+            return "Vehicle Registration / Insurance Document"
+        if any(w in upper for w in ["CHEQUE", "PAY TO", "BEARER", "MICR", "A/C PAYEE"]):
+            return "Cheque / Cancelled Cheque"
+        if any(w in upper for w in ["MARKSHEET", "UNIVERSITY", "DEGREE", "SEMESTER", "ROLL NO", "EXAMINATION"]):
+            return "Academic Degree / Educational Certificate"
+        if any(w in upper for w in ["HOSPITAL", "DIAGNOSIS", "PATIENT", "PRESCRIPTION", "CLINIC", "RX"]):
+            return "Medical Prescription / Health Record"
+        if any(w in upper for w in ["FIXED DEPOSIT", "TERM DEPOSIT", "FD ADVICE", "MATURITY VALUE"]):
+            return "Fixed Deposit Receipt / Advice"
+        return "Unclassified / Non-Banking Document"
 
     def _heuristic_fallback(self, text: str, error: Optional[str] = None) -> ClassificationResult:
         """
@@ -215,80 +245,108 @@ class LLMClassifierService:
         if "AADHAAR" in upper_text or "UIDAI" in upper_text or "MERA AADHAAR" in upper_text:
             return ClassificationResult(
                 category="AADHAAR_CARD",
-                confidence=0.9,
+                confidence_score=92,
+                confidence=0.92,
+                guess=None,
                 reasoning="Heuristic match: UIDAI / Aadhaar anchor terms present.",
             )
         if "INCOME TAX DEPARTMENT" in upper_text and ("PERMANENT ACCOUNT NUMBER" in upper_text or "PAN" in upper_text):
             return ClassificationResult(
                 category="PAN_CARD",
-                confidence=0.9,
+                confidence_score=92,
+                confidence=0.92,
+                guess=None,
                 reasoning="Heuristic match: Income Tax Department / PAN anchors present.",
             )
         if "ELECTION COMMISSION OF INDIA" in upper_text or "IDENTITY CARD" in upper_text and "EPIC" in upper_text:
             return ClassificationResult(
                 category="VOTER_ID",
-                confidence=0.88,
+                confidence_score=90,
+                confidence=0.90,
+                guess=None,
                 reasoning="Heuristic match: Election Commission / EPIC anchors present.",
             )
         if "DRIVING LICENCE" in upper_text or "UNION OF INDIA DRIVING LICENCE" in upper_text or "MOTOR VEHICLES" in upper_text:
             return ClassificationResult(
                 category="DRIVING_LICENCE",
-                confidence=0.88,
+                confidence_score=90,
+                confidence=0.90,
+                guess=None,
                 reasoning="Heuristic match: Driving Licence keywords present.",
             )
         if "PASSPORT" in upper_text and ("REPUBLIC OF INDIA" in upper_text or "INDIAN PASSPORT" in upper_text):
             return ClassificationResult(
                 category="PASSPORT",
-                confidence=0.92,
+                confidence_score=95,
+                confidence=0.95,
+                guess=None,
                 reasoning="Heuristic match: Republic of India Passport anchors present.",
             )
-        if "GOODS AND SERVICES TAX" in upper_text or "GSTIN" in upper_text or "GSTR-3B" in upper_text or "GSTR-1" in upper_text:
+        if "GOODS AND SERVICES TAX" in upper_text or "GSTIN" in upper_text or "GSTR-3B" in upper_text or "GSTR-1" in upper_text or "FORM GSTR" in upper_text:
             return ClassificationResult(
                 category="GST_RETURN",
-                confidence=0.85,
+                confidence_score=90,
+                confidence=0.90,
+                guess=None,
                 reasoning="Heuristic match: Goods and Services Tax / GSTIN / GSTR keywords present.",
             )
         if "ITR-V" in upper_text or "INDIAN INCOME TAX RETURN" in upper_text or "ACKNOWLEDGEMENT NUMBER" in upper_text:
             return ClassificationResult(
                 category="INCOME_TAX_RETURN",
-                confidence=0.85,
+                confidence_score=90,
+                confidence=0.90,
+                guess=None,
                 reasoning="Heuristic match: Income Tax Return / ITR-V anchors present.",
             )
-        if "PURCHASE ORDER" in upper_text or "P.O. NUMBER" in upper_text or "PO NO" in upper_text:
+        if "PURCHASE ORDER" in upper_text or "P.O. NUMBER" in upper_text or "PO NO" in upper_text or "WORK ORDER" in upper_text:
             return ClassificationResult(
                 category="PURCHASE_ORDER",
-                confidence=0.85,
-                reasoning="Heuristic match: Purchase Order / PO Number anchors present.",
+                confidence_score=90,
+                confidence=0.90,
+                guess=None,
+                reasoning="Heuristic match: Purchase Order / Work Order headers present.",
             )
         if "TAX INVOICE" in upper_text or "COMMERCIAL INVOICE" in upper_text or "INVOICE NO" in upper_text:
             return ClassificationResult(
                 category="TAX_INVOICE",
-                confidence=0.85,
-                reasoning="Heuristic match: Tax Invoice / Bill headers present.",
+                confidence_score=90,
+                confidence=0.90,
+                guess=None,
+                reasoning="Heuristic match: Tax Invoice / Commercial Invoice headers present.",
             )
         if "ACCOUNT STATEMENT" in upper_text or "IFSC CODE" in upper_text or "CLOSING BALANCE" in upper_text or "TRANSACTION DETAILS" in upper_text:
             return ClassificationResult(
                 category="BANK_STATEMENT",
-                confidence=0.85,
+                confidence_score=90,
+                confidence=0.90,
+                guess=None,
                 reasoning="Heuristic match: Bank Account Statement anchors present.",
             )
         if "BALANCE SHEET" in upper_text or "PROFIT AND LOSS" in upper_text or "AUDITOR'S REPORT" in upper_text:
             return ClassificationResult(
                 category="AUDITED_FINANCIALS",
-                confidence=0.85,
+                confidence_score=90,
+                confidence=0.90,
+                guess=None,
                 reasoning="Heuristic match: Balance Sheet / Financial Statement headers present.",
             )
         if "UDYAM REGISTRATION" in upper_text or "MINISTRY OF MICRO, SMALL" in upper_text or "CERTIFICATE OF INCORPORATION" in upper_text:
             return ClassificationResult(
                 category="BUSINESS_REGISTRATION",
-                confidence=0.85,
+                confidence_score=90,
+                confidence=0.90,
+                guess=None,
                 reasoning="Heuristic match: Udyam / Incorporation registration anchors present.",
             )
 
+        guess_val = self._guess_unknown_type(text)
+        conf = 45 if guess_val != "Unclassified / Non-Banking Document" else 20
         return ClassificationResult(
             category="UNKNOWN",
-            confidence=0.3,
-            reasoning=f"Fallback triggered. Document could not be conclusively classified. ({error or 'No match'})",
+            confidence_score=conf,
+            guess=guess_val,
+            confidence=round(conf / 100.0, 2),
+            reasoning=f"Fallback triggered. Document could not be conclusively classified into banking taxonomy. ({error or 'No direct anchor match'})",
         )
 
 

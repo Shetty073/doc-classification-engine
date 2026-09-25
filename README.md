@@ -273,29 +273,43 @@ curl -X GET "http://localhost:8000/documents/LOAN_APP_2026_001/status" \
 ```json
 {
   "reference_id": "LOAN_APP_2026_001",
-  "total_count": 2,
+  "total_count": 3,
   "counts_by_status": {
     "PENDING": 0,
     "PROCESSING": 0,
-    "COMPLETED": 2,
+    "COMPLETED": 3,
     "FAILED": 0
   },
   "documents": [
     {
-      "document_id": "doc_5669777e34034cf59d92d4cf504164e4",
+      "document_id": "doc_58eb4990f4284049b2024da2cb0aecb3",
       "status": "COMPLETED",
       "category": "GST_RETURN",
+      "confidence_score": 100,
+      "guess": null,
       "error_message": null,
-      "created_at": "2026-09-25T17:30:47Z",
-      "updated_at": "2026-09-25T17:30:50Z"
+      "created_at": "2026-09-25T17:48:30Z",
+      "updated_at": "2026-09-25T17:48:33Z"
     },
     {
-      "document_id": "doc_35a90136d72248bb945f72ecf5baf045",
+      "document_id": "doc_70d9606f78dd463b8d8e1f253b6fada5",
       "status": "COMPLETED",
       "category": "PAN_CARD",
+      "confidence_score": 100,
+      "guess": null,
       "error_message": null,
-      "created_at": "2026-09-25T17:30:48Z",
-      "updated_at": "2026-09-25T17:30:52Z"
+      "created_at": "2026-09-25T17:48:31Z",
+      "updated_at": "2026-09-25T17:48:35Z"
+    },
+    {
+      "document_id": "doc_39911831a6e9403dac781f5cb4c6094a",
+      "status": "COMPLETED",
+      "category": "UNKNOWN",
+      "confidence_score": 95,
+      "guess": "Electricity / Utility Bill",
+      "error_message": null,
+      "created_at": "2026-09-25T17:48:32Z",
+      "updated_at": "2026-09-25T17:48:38Z"
     }
   ]
 }
@@ -312,20 +326,24 @@ curl -X GET "http://localhost:8000/documents/LOAN_APP_2026_001" \
 ```json
 [
   {
-    "document_id": "doc_5669777e34034cf59d92d4cf504164e4",
+    "document_id": "doc_58eb4990f4284049b2024da2cb0aecb3",
     "reference_id": "LOAN_APP_2026_001",
     "category": "GST_RETURN",
-    "document_url": "http://127.0.0.1:8000/documents/download/doc_5669777e34034cf59d92d4cf504164e4",
-    "created_at": "2026-09-25T17:30:47Z",
-    "updated_at": "2026-09-25T17:30:50Z"
+    "confidence_score": 100,
+    "guess": null,
+    "document_url": "http://127.0.0.1:8000/documents/download/doc_58eb4990f4284049b2024da2cb0aecb3",
+    "created_at": "2026-09-25T17:48:30Z",
+    "updated_at": "2026-09-25T17:48:33Z"
   },
   {
-    "document_id": "doc_35a90136d72248bb945f72ecf5baf045",
+    "document_id": "doc_39911831a6e9403dac781f5cb4c6094a",
     "reference_id": "LOAN_APP_2026_001",
-    "category": "PAN_CARD",
-    "document_url": "http://127.0.0.1:8000/documents/download/doc_35a90136d72248bb945f72ecf5baf045",
-    "created_at": "2026-09-25T17:30:48Z",
-    "updated_at": "2026-09-25T17:30:52Z"
+    "category": "UNKNOWN",
+    "confidence_score": 95,
+    "guess": "Electricity / Utility Bill",
+    "document_url": "http://127.0.0.1:8000/documents/download/doc_39911831a6e9403dac781f5cb4c6094a",
+    "created_at": "2026-09-25T17:48:32Z",
+    "updated_at": "2026-09-25T17:48:38Z"
   }
 ]
 ```

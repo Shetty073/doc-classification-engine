@@ -199,7 +199,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["documents", "{{referenceId}}", "status"]
             },
-            "description": "Returns processing status overview across all documents for the given reference ID, including counts breakdown (PENDING, PROCESSING, COMPLETED, FAILED)."
+            "description": "Returns processing status overview across all documents for the given reference ID, including counts breakdown (PENDING, PROCESSING, COMPLETED, FAILED), classified category, confidence_score (1-100), and guess (for UNKNOWN documents)."
           }
         },
         {
@@ -217,7 +217,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["documents", "{{referenceId}}"]
             },
-            "description": "Returns list of all completed documents for the reference ID, with document_id, category, and secure document_url download link."
+            "description": "Returns list of all completed documents for the reference ID, with document_id, category, confidence_score (1-100), guess (for UNKNOWN documents), and secure document_url download link."
           }
         },
         {

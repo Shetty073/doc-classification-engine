@@ -30,9 +30,9 @@ def run_live_tests():
         print("   -> OK! JWT token acquired successfully.")
 
         auth_headers = {"Authorization": f"Bearer {access_token}"}
+        ref_id = f"REF_TEST_{int(time.time())}"
 
         # 3. Test POST /upload with PDF (GSTR-3B)
-        ref_id = f"REF_TEST_{int(time.time())}"
         print(f"3. Testing POST /upload with PDF (Set_4_GSTR3B_July_2025.pdf) for {ref_id}...")
         with open("sample_dataset/Set_4_GSTR3B_July_2025.pdf", "rb") as f:
             pdf_res = client.post(
@@ -62,39 +62,71 @@ def run_live_tests():
         assert img_data["status"] == "PENDING"
         print(f"   -> OK! Image uploaded: doc_id={img_doc_id}, status=PENDING")
 
-        # 5. Wait for ARQ worker to process both documents
-        print("5. Polling GET /documents/{ref_id}/status for worker completion...")
+        # 5. Test POST /upload with UNKNOWN document (sample_electricity_bill.pdf)
+        print("5. Testing POST /upload with UNKNOWN document (sample_electricity_bill.pdf)...")
+        with open("tests/fixtures/sample_electricity_bill.pdf", "rb") as f:
+            unk_res = client.post(
+                "/upload",
+                headers=auth_headers,
+                data={"reference_id": ref_id},
+                files={"file": ("sample_electricity_bill.pdf", f, "application/pdf")},
+            )
+        assert unk_res.status_code == 202, f"Unknown doc upload failed: {unk_res.text}"
+        unk_data = unk_res.json()
+        unk_doc_id = unk_data["document_id"]
+        assert unk_data["status"] == "PENDING"
+        print(f"   -> OK! Unknown doc uploaded: doc_id={unk_doc_id}, status=PENDING")
+
+        # 6. Wait for ARQ worker to process all 3 documents
+        print("6. Polling GET /documents/{ref_id}/status for worker completion...")
         completed = False
-        for attempt in range(30):
+        status_summary = {}
+        for attempt in range(40):
             time.sleep(2)
             status_res = client.get(f"/documents/{ref_id}/status", headers=auth_headers)
             assert status_res.status_code == 200
             status_summary = status_res.json()
             counts = status_summary["counts_by_status"]
             print(f"   [Poll #{attempt + 1}] Counts: {counts}")
-            if counts.get("COMPLETED", 0) == 2:
+            if counts.get("COMPLETED", 0) == 3:
                 completed = True
                 break
 
         assert completed, f"Documents did not complete within timeout. Status: {status_summary}"
-        print("   -> OK! Both documents processed by ARQ worker.")
+        print("   -> OK! All 3 documents processed by ARQ worker.")
 
-        # 6. Test GET /documents/{ref_id}
-        print("6. Testing GET /documents/{ref_id} (completed list)...")
+        # 7. Test GET /documents/{ref_id}
+        print("7. Testing GET /documents/{ref_id} (completed list)...")
         docs_res = client.get(f"/documents/{ref_id}", headers=auth_headers)
         assert docs_res.status_code == 200
         completed_docs = docs_res.json()
-        assert len(completed_docs) == 2
+        assert len(completed_docs) == 3
 
         doc_map = {d["document_id"]: d for d in completed_docs}
-        print(f"   - PDF doc ({pdf_doc_id}) Category: {doc_map[pdf_doc_id]['category']}")
-        print(f"   - Image doc ({img_doc_id}) Category: {doc_map[img_doc_id]['category']}")
-        assert doc_map[pdf_doc_id]["category"] == "GST_RETURN"
-        assert doc_map[img_doc_id]["category"] == "PAN_CARD"
-        print("   -> OK! Exact categories verified against Indian Banking Taxonomy.")
 
-        # 7. Test GET /documents/download/{doc_id}
-        print("7. Testing secure download GET /documents/download/{doc_id}...")
+        # Verify GSTR
+        gstr_doc = doc_map[pdf_doc_id]
+        print(f"   - GSTR PDF doc: Category={gstr_doc['category']}, Score={gstr_doc['confidence_score']}/100, Guess={gstr_doc['guess']}")
+        assert gstr_doc["category"] == "GST_RETURN"
+        assert 1 <= gstr_doc["confidence_score"] <= 100
+
+        # Verify PAN
+        pan_doc = doc_map[img_doc_id]
+        print(f"   - PAN Image doc: Category={pan_doc['category']}, Score={pan_doc['confidence_score']}/100, Guess={pan_doc['guess']}")
+        assert pan_doc["category"] == "PAN_CARD"
+        assert 1 <= pan_doc["confidence_score"] <= 100
+
+        # Verify UNKNOWN document with guess and score (1 to 100)
+        unk_doc = doc_map[unk_doc_id]
+        print(f"   - UNKNOWN doc: Category={unk_doc['category']}, Score={unk_doc['confidence_score']}/100, Guess={unk_doc['guess']}")
+        assert unk_doc["category"] == "UNKNOWN"
+        assert 1 <= unk_doc["confidence_score"] <= 100
+        assert unk_doc["guess"] is not None and len(unk_doc["guess"]) > 0
+        assert "Electricity" in unk_doc["guess"] or "Utility" in unk_doc["guess"]
+        print("   -> OK! UNKNOWN document correctly returned best guess and confidence score (1 to 100).")
+
+        # 8. Test secure download
+        print("8. Testing secure download GET /documents/download/{doc_id}...")
         download_url = doc_map[pdf_doc_id]["document_url"]
         dl_res = client.get(download_url, headers=auth_headers)
         assert dl_res.status_code == 200

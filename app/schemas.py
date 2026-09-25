@@ -49,6 +49,8 @@ class CompletedDocumentItem(BaseModel):
     document_id: str
     reference_id: str
     category: Optional[str] = None
+    confidence_score: Optional[int] = Field(default=None, ge=1, le=100, description="Confidence score between 1 and 100")
+    guess: Optional[str] = Field(default=None, description="Heuristic/LLM guess if document is UNKNOWN")
     document_url: str
     created_at: datetime
     updated_at: datetime
@@ -60,6 +62,8 @@ class DocumentStatusSummaryItem(BaseModel):
     document_id: str
     status: DocumentStatus
     category: Optional[str] = None
+    confidence_score: Optional[int] = Field(default=None, ge=1, le=100, description="Confidence score between 1 and 100")
+    guess: Optional[str] = Field(default=None, description="Heuristic/LLM guess if document is UNKNOWN")
     error_message: Optional[str] = None
     created_at: datetime
     updated_at: datetime
@@ -79,6 +83,8 @@ class ReferenceStatusResponse(BaseModel):
 # ---------------------------------------------------------
 class ClassificationResult(BaseModel):
     category: str
-    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    confidence_score: int = Field(default=85, ge=1, le=100, description="Confidence score between 1 and 100")
+    guess: Optional[str] = Field(default=None, description="Hypothesis/guess of document type if category is UNKNOWN")
+    confidence: float = Field(default=0.85, ge=0.0, le=1.0)
     reasoning: Optional[str] = None
     sub_category: Optional[str] = None

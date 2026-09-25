@@ -75,13 +75,15 @@ async def process_document(ctx: dict, document_id: str, file_path: str):
                 classification.reasoning,
             )
 
-            # Step 5: Update DB with category and status COMPLETED
+            # Step 5: Update DB with category, confidence_score, guess, and status COMPLETED
             update_stmt = (
                 update(Document)
                 .where(Document.document_id == document_id)
                 .values(
                     status=DocumentStatus.COMPLETED,
                     category=classification.category,
+                    confidence_score=classification.confidence_score,
+                    guess=classification.guess,
                     raw_text=extracted_text,
                     error_message=None,
                     updated_at=datetime.now(timezone.utc),
@@ -89,7 +91,13 @@ async def process_document(ctx: dict, document_id: str, file_path: str):
             )
             await session.execute(update_stmt)
             await session.commit()
-            logger.info("Document %s processing successfully COMPLETED.", document_id)
+            logger.info(
+                "Document %s COMPLETED (Category: %s, Score: %s/100, Guess: %s)",
+                document_id,
+                classification.category,
+                classification.confidence_score,
+                classification.guess,
+            )
 
         except Exception as e:
             logger.error("Pipeline failure for document %s: %s", document_id, e, exc_info=True)
