@@ -220,9 +220,36 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 arq app.worker.WorkerSettings
 ```
 
+#### Terminal 3: Start React (Vite) Demo Frontend
+```bash
+cd frontend
+npm install
+npm run dev
+```
+*Accessible in browser:* **`http://localhost:5173`**
+* Features: 1-click demo login, drag & drop document upload, batch uploads, real-time polling, confidence badges, AI guess pills, and authenticated document download.
+
 ---
 
-### 5. Running Automated Tests
+### 5. Running via Docker Compose (Containerized Backend Stack)
+
+You can containerize the **FastAPI backend**, **ARQ worker**, **PostgreSQL**, and **Redis** with a single command (excluding the standalone frontend and host-running `llama.cpp`):
+
+```bash
+# Build and launch backend, worker, postgres, and redis
+docker compose up --build -d
+
+# View real-time logs
+docker compose logs -f backend worker
+
+# Tear down services
+docker compose down
+```
+* The containerized backend automatically communicates with your local host's `llama.cpp` server via `http://host.docker.internal:8080/v1/chat/completions`.
+
+---
+
+### 6. Running Automated Tests
 
 #### Run Unit & Endpoint Test Suite
 ```bash
