@@ -52,6 +52,35 @@ The platform automates the ingestion, text extraction, image quality auditing, a
 
 ---
 
+## ⚡ Quick Start (Unified Single-Window Launchers)
+
+Launch the entire stack (**FastAPI Backend**, **ARQ Distributed Worker**, and **Vite Frontend Dashboard**) with a single command. The runner stays open while services are active and cleanly terminates all background processes upon exit (`Ctrl+C`, pressing `q`, or closing the window):
+
+### On Windows:
+```cmd
+:: Run FastAPI, ARQ Worker, and Vite Frontend concurrently in one window
+run.bat
+
+:: Press Ctrl+C or 'q' in the window to stop all services and close
+```
+
+### On Linux / macOS / WSL:
+```bash
+# Make executable and launch all services
+chmod +x run.sh
+./run.sh
+
+# Press Ctrl+C to terminate all services cleanly
+```
+
+Once launched:
+* **Enterprise Dashboard:** `http://localhost:5173`
+* **FastAPI Backend:** `http://localhost:8000`
+* **Swagger API Docs:** `http://localhost:8000/docs`
+* **Health Check:** `http://localhost:8000/health`
+
+---
+
 ## 💻 Enterprise Web Dashboard (React + Vite)
 
 The engine includes a modern, high-density **Enterprise Banking Dashboard** designed in the aesthetic style of Stripe, Plaid, and AWS Management Console.
