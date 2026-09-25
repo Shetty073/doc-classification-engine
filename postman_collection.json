@@ -1,0 +1,262 @@
+{
+  "info": {
+    "_postman_id": "8b52f360-14e3-4f11-9a72-IndianBankDocClassification",
+    "name": "Indian Financial Document Classification Engine",
+    "description": "Enterprise API Collection for RBI KYC OVDs and Business Lending Document Classification Engine using FastAPI, ARQ/Redis, PaddleOCR, and Llama-3.2-3B-Instruct.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:8000",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "referenceId",
+      "value": "LOAN_APP_2026_MUM_001",
+      "type": "string"
+    },
+    {
+      "key": "documentId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Authentication",
+      "item": [
+        {
+          "name": "Obtain JWT Access Token (/token)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.access_token) {",
+                  "    pm.collectionVariables.set('token', jsonData.access_token);",
+                  "    console.log('JWT Token saved to collection variable: ' + jsonData.access_token);",
+                  "}",
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Token type is bearer', function () {",
+                  "    pm.expect(jsonData.token_type).to.eql('bearer');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "username",
+                  "value": "admin",
+                  "type": "text"
+                },
+                {
+                  "key": "password",
+                  "value": "admin_secure_pass123",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/token",
+              "host": ["{{baseUrl}}"],
+              "path": ["token"]
+            },
+            "description": "Authenticates banking operator and retrieves signed JWT access token."
+          }
+        },
+        {
+          "name": "Register New Banking Operator (/register)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"compliance_officer_1\",\n  \"password\": \"StrictSecurePass#2026\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["register"]
+            },
+            "description": "Registers a new operator user account."
+          }
+        },
+        {
+          "name": "Get Current Authenticated User Profile (/me)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["me"]
+            },
+            "description": "Validates the active JWT and returns the user profile."
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Document Ingestion & Classification",
+      "item": [
+        {
+          "name": "Upload Document (/upload)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.document_id) {",
+                  "    pm.collectionVariables.set('documentId', jsonData.document_id);",
+                  "}",
+                  "pm.test('Status code is 202 Accepted', function () {",
+                  "    pm.response.to.have.status(202);",
+                  "});",
+                  "pm.test('Status is PENDING', function () {",
+                  "    pm.expect(jsonData.status).to.eql('PENDING');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "reference_id",
+                  "value": "{{referenceId}}",
+                  "type": "text"
+                },
+                {
+                  "key": "file",
+                  "description": "Select PDF or Image file (Aadhaar, PAN, GST Return, PO, Invoice, Balance Sheet)",
+                  "type": "file",
+                  "src": ""
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/upload",
+              "host": ["{{baseUrl}}"],
+              "path": ["upload"]
+            },
+            "description": "Uploads PDF or image document (PDF, PNG, JPG, WEBP, TIFF), stores file in ./uploads, creates PENDING database record and enqueues background OCR + LLM classification job to ARQ/Redis."
+          }
+        },
+        {
+          "name": "Get Application Processing Status Breakdown (/documents/:reference_id/status)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/documents/{{referenceId}}/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["documents", "{{referenceId}}", "status"]
+            },
+            "description": "Returns processing status overview across all documents for the given reference ID, including counts breakdown (PENDING, PROCESSING, COMPLETED, FAILED)."
+          }
+        },
+        {
+          "name": "List Completed Documents (/documents/:reference_id)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/documents/{{referenceId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["documents", "{{referenceId}}"]
+            },
+            "description": "Returns list of all completed documents for the reference ID, with document_id, category, and secure document_url download link."
+          }
+        },
+        {
+          "name": "Secure Download Document (/documents/download/:document_id)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/documents/download/{{documentId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["documents", "download", "{{documentId}}"]
+            },
+            "description": "Streams the verified document file securely from storage."
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Health & Observability",
+      "item": [
+        {
+          "name": "System Health Check (/health)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            },
+            "description": "Liveness probe returning application health and confirming security headers."
+          }
+        }
+      ]
+    }
+  ]
+}
