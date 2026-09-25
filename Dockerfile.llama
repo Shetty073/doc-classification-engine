@@ -1,0 +1,22 @@
+# Official, optimized multi-architecture llama.cpp server image
+FROM ghcr.io/ggerganov/llama.cpp:server
+
+# Default configurable environment variables for model attributes
+ENV MODEL_PATH=/models/Llama-3.2-3B-Instruct-Q4_K_M.gguf \
+    CTX_SIZE=4096 \
+    N_GPU_LAYERS=0 \
+    THREADS=4 \
+    BATCH_SIZE=512 \
+    PORT=8080 \
+    HOST=0.0.0.0 \
+    TEMPERATURE=0.05 \
+    EXTRA_ARGS=""
+
+WORKDIR /
+
+COPY docker/llama-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 8080
+
+ENTRYPOINT ["/entrypoint.sh"]

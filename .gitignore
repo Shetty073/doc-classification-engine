@@ -47,9 +47,11 @@ uploads/
 scratch/
 *.log
 
-# Large Datasets
+# Large Datasets & Models
 sample_dataset/
 sample_datset/
+models/
+*.gguf
 
 # IDE / Editor folders
 .vscode/

@@ -231,21 +231,66 @@ npm run dev
 
 ---
 
-### 5. Running via Docker Compose (Containerized Backend Stack)
+### 5. Running via Docker Compose
 
-You can containerize the **FastAPI backend**, **ARQ worker**, **PostgreSQL**, and **Redis** with a single command (excluding the standalone frontend and host-running `llama.cpp`):
+Two Docker Compose configurations are provided:
+
+#### Option A: Default Stack (`docker-compose.yml`) — Backend Services Only
+Runs the **FastAPI backend**, **ARQ worker**, **PostgreSQL**, and **Redis** in containers while keeping `llama.cpp` and the `frontend` running standalone on the host:
 
 ```bash
-# Build and launch backend, worker, postgres, and redis
+# 1. Start backend stack with default replicas (1 backend, 2 workers)
 docker compose up --build -d
 
-# View real-time logs
+# 2. Scale worker instances on demand (e.g. 4 parallel OCR/classification workers)
+docker compose up --scale worker=4 -d
+
+# 3. View real-time logs
 docker compose logs -f backend worker
 
-# Tear down services
+# 4. Stop stack
 docker compose down
 ```
-* The containerized backend automatically communicates with your local host's `llama.cpp` server via `http://host.docker.internal:8080/v1/chat/completions`.
+* **Host LLM Bridge:** Communicates with your host-running `llama.cpp` server via `http://host.docker.internal:8080/v1/chat/completions`.
+
+---
+
+#### Option B: Full Stack (`docker-compose.full.yml`) — All 6 Services Containerized
+Runs **PostgreSQL**, **Redis**, **llama.cpp server**, **FastAPI backend**, **ARQ worker**, and **React frontend (Nginx)** fully containerized:
+
+```bash
+# 1. Place your GGUF model into the ./models directory:
+#    ./models/Llama-3.2-3B-Instruct-Q4_K_M.gguf
+
+# 2. Build and launch all 6 services:
+docker compose -f docker-compose.full.yml up --build -d
+
+# 3. Scale workers to 4 instances:
+docker compose -f docker-compose.full.yml up --scale worker=4 -d
+
+# 4. Access points:
+#    - Frontend Dashboard: http://localhost:5173
+#    - Backend REST API:   http://localhost:8000/docs
+#    - llama.cpp Server:   http://localhost:8080/health
+
+# 5. Stop full stack:
+docker compose -f docker-compose.full.yml down
+```
+
+#### Configuring Model Attributes & Service Replicas
+You can configure model attributes and service instance counts by creating a `.env` file (or copying [`.env.docker.example`](file:///f:/doc-classification-engine/.env.docker.example)):
+
+| Variable | Default Value | Description |
+| :--- | :--- | :--- |
+| `WORKER_REPLICAS` | `2` | Number of parallel background ARQ OCR/classification workers. |
+| `BACKEND_REPLICAS` | `1` | Number of FastAPI REST API server instances. |
+| `FRONTEND_REPLICAS`| `1` | Number of Nginx React frontend instances. |
+| `LLAMA_MODEL_PATH` | `/models/Llama-3.2-3B-Instruct-Q4_K_M.gguf` | Path to GGUF weights inside `/models`. |
+| `LLAMA_CTX_SIZE` | `4096` | Context window size for document analysis. |
+| `LLAMA_N_GPU_LAYERS` | `0` | Number of model layers offloaded to GPU (`-ngl`). |
+| `LLAMA_THREADS` | `4` | Number of CPU threads for inference. |
+| `LLAMA_BATCH_SIZE` | `512` | Evaluation batch size for prompt processing. |
+| `LLAMA_TEMPERATURE` | `0.05` | Determinism temperature for JSON classification. |
 
 ---
 

@@ -1,0 +1,14 @@
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.log
+.pytest_cache/
+sample_dataset/
+sample_datset/
+models/
+*.gguf
+frontend/
+.git/
+.gitignore
+uploads/
