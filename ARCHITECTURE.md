@@ -71,9 +71,12 @@ flowchart TB
     WorkerConsumer --> StateUpdater1 --> PostgresDB
     WorkerConsumer --> FormatDetector
 
-    FormatDetector -- ".pdf (Digital)" --> PyMuPDFText --> TextNormalizer
-    FormatDetector -- ".pdf (Scanned)" --> PyMuPDFRaster --> PaddleOCR --> TextNormalizer
-    FormatDetector -- "Image (.png, .jpg)" --> PaddleOCR --> TextNormalizer
+    FormatDetector -->|".pdf (Digital)"| PyMuPDFText
+    PyMuPDFText --> TextNormalizer
+    FormatDetector -->|".pdf (Scanned)"| PyMuPDFRaster
+    PyMuPDFRaster --> PaddleOCR
+    PaddleOCR --> TextNormalizer
+    FormatDetector -->|"Image (.png, .jpg)"| PaddleOCR
 
     TextNormalizer --> PromptBuilder --> HTTPXClient --> LlamaServer
     LlamaServer --> HTTPXClient --> PostReconciliation --> StateUpdater2 --> PostgresDB
@@ -155,26 +158,28 @@ sequenceDiagram
 erDiagram
     users {
         int id PK "Auto-increment primary key"
-        varchar username UK "Unique banking operator handle"
-        varchar hashed_password "Bcrypt hash with salt"
+        string username UK "Unique banking operator handle"
+        string hashed_password "Bcrypt hash with salt"
         boolean is_active "Account status flag"
         timestamptz created_at "Account creation timestamp"
     }
 
     documents {
         uuid id PK "UUID primary key"
-        varchar document_id UK "Unique external identifier (doc_{uuid})"
-        varchar reference_id IX "Lending dossier / KYC reference ID"
-        varchar file_path "Absolute path to stored binary on disk"
-        enum status IX "PENDING, PROCESSING, COMPLETED, FAILED"
-        varchar category IX "Classified Indian banking taxonomy code"
-        text raw_text "Full extracted OCR plain text"
-        text error_message "Diagnostic pipeline error message on failure"
+        string document_id UK "Unique external identifier"
+        string reference_id "Lending dossier / KYC reference ID (Indexed)"
+        string file_path "Absolute path to stored binary on disk"
+        string status "PENDING, PROCESSING, COMPLETED, FAILED (Indexed)"
+        string category "Classified Indian banking taxonomy code (Indexed)"
+        int confidence_score "Confidence score 1 to 100"
+        string guess "Hypothesis if category is UNKNOWN"
+        string raw_text "Full extracted OCR plain text"
+        string error_message "Diagnostic pipeline error message on failure"
         timestamptz created_at "Upload timestamp"
         timestamptz updated_at "Status change / completion timestamp"
     }
 
-    users ||--o{ documents : "operator manages"
+    users ||--o{ documents : "manages"
 ```
 
 ---
@@ -183,11 +188,11 @@ erDiagram
 
 ```mermaid
 stateDiagram-v2
-    [*] --> PENDING : POST /upload (File saved, DB record inserted, ARQ enqueued)
-    PENDING --> PROCESSING : ARQ Worker picks job & starts OCR
-    PROCESSING --> COMPLETED : OCR extracted & llama.cpp classified document
-    PROCESSING --> FAILED : OCR error, corrupted file, or LLM timeout
-    FAILED --> PENDING : Operator triggers manual retry
+    [*] --> PENDING : POST /upload
+    PENDING --> PROCESSING : Worker picks job and starts OCR
+    PROCESSING --> COMPLETED : Document classified
+    PROCESSING --> FAILED : OCR error or timeout
+    FAILED --> PENDING : Trigger retry
     COMPLETED --> [*]
 ```
 
