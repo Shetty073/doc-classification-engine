@@ -185,6 +185,57 @@
           }
         },
         {
+          "name": "Upload Batch Documents (/upload-batch)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "pm.test('Status code is 202 Accepted', function () {",
+                  "    pm.response.to.have.status(202);",
+                  "});",
+                  "pm.test('Batch total enqueued >= 1', function () {",
+                  "    pm.expect(jsonData.total_enqueued).to.be.above(0);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "reference_id",
+                  "value": "{{referenceId}}",
+                  "type": "text"
+                },
+                {
+                  "key": "files",
+                  "description": "Select multiple files for batch processing",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/upload-batch",
+              "host": ["{{baseUrl}}"],
+              "path": ["upload-batch"]
+            },
+            "description": "Uploads multiple KYC or financial documents under a single reference ID, creating atomic PENDING records and concurrent background processing jobs."
+          }
+        },
+        {
           "name": "Get Application Processing Status Breakdown (/documents/:reference_id/status)",
           "request": {
             "method": "GET",

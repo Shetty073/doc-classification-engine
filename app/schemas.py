@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field
 from app.models import DocumentStatus
 
@@ -41,8 +41,21 @@ class DocumentUploadResponse(BaseModel):
     document_id: str
     reference_id: str
     status: DocumentStatus
+    callback_url: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class BatchUploadItem(BaseModel):
+    document_id: str
+    filename: str
+    status: DocumentStatus
+
+
+class BatchUploadResponse(BaseModel):
+    reference_id: str
+    total_enqueued: int
+    documents: List[BatchUploadItem]
 
 
 class CompletedDocumentItem(BaseModel):
@@ -51,6 +64,9 @@ class CompletedDocumentItem(BaseModel):
     category: Optional[str] = None
     confidence_score: Optional[int] = Field(default=None, ge=1, le=100, description="Confidence score between 1 and 100")
     guess: Optional[str] = Field(default=None, description="Heuristic/LLM guess if document is UNKNOWN")
+    extracted_metadata: Optional[Dict[str, Any]] = Field(default=None, description="Extracted key-value entities")
+    quality_score: Optional[int] = Field(default=None, ge=1, le=100, description="Document image quality score")
+    quality_issues: Optional[List[str]] = Field(default=None, description="Quality issue flags")
     document_url: str
     created_at: datetime
     updated_at: datetime
@@ -64,6 +80,9 @@ class DocumentStatusSummaryItem(BaseModel):
     category: Optional[str] = None
     confidence_score: Optional[int] = Field(default=None, ge=1, le=100, description="Confidence score between 1 and 100")
     guess: Optional[str] = Field(default=None, description="Heuristic/LLM guess if document is UNKNOWN")
+    extracted_metadata: Optional[Dict[str, Any]] = Field(default=None, description="Extracted key-value entities")
+    quality_score: Optional[int] = Field(default=None, ge=1, le=100, description="Document image quality score")
+    quality_issues: Optional[List[str]] = Field(default=None, description="Quality issue flags")
     error_message: Optional[str] = None
     created_at: datetime
     updated_at: datetime
@@ -88,3 +107,4 @@ class ClassificationResult(BaseModel):
     confidence: float = Field(default=0.85, ge=0.0, le=1.0)
     reasoning: Optional[str] = None
     sub_category: Optional[str] = None
+    extracted_metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Structured extracted entities")

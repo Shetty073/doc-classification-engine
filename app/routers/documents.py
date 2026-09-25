@@ -1,7 +1,7 @@
 import os
 import re
 import uuid
-from typing import List
+from typing import List, Optional
 from fastapi import (
     APIRouter,
     Depends,
@@ -20,6 +20,8 @@ from app.database import get_db
 from app.limiter import limiter
 from app.models import Document, DocumentStatus, User
 from app.schemas import (
+    BatchUploadItem,
+    BatchUploadResponse,
     CompletedDocumentItem,
     DocumentStatusSummaryItem,
     DocumentUploadResponse,
@@ -33,36 +35,18 @@ router = APIRouter(tags=["Documents"])
 def sanitize_filename(filename: str) -> str:
     """Sanitizes filename to prevent directory traversal or malformed paths."""
     clean = os.path.basename(filename)
-    # Remove all characters except alphanumeric, dashes, underscores, and dots
     clean = re.sub(r"[^a-zA-Z0-9_.-]", "_", clean)
     return clean or "document"
 
 
-@router.post(
-    "/upload",
-    response_model=DocumentUploadResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-    summary="Upload financial document for asynchronous OCR and classification",
-)
-@limiter.limit(settings.RATE_LIMIT_UPLOAD)
-async def upload_document(
-    request: Request,
-    file: UploadFile = File(..., description="Document file (PDF or Image)"),
-    reference_id: str = Form(..., min_length=1, max_length=64, description="Lending/KYC application reference ID"),
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Accepts a KYC or financial document, stores it securely, creates a PENDING
-    record in PostgreSQL, and enqueues an asynchronous processing job to ARQ/Redis.
-    """
+async def _save_upload_file(file: UploadFile, unique_doc_id: str) -> str:
+    """Safely streams an upload file to disk while enforcing path containment and size limit."""
     if not file.filename:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Filename must not be empty.",
         )
 
-    # 1. Validate file extension
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in settings.ALLOWED_EXTENSIONS:
         raise HTTPException(
@@ -70,13 +54,10 @@ async def upload_document(
             detail=f"Unsupported file format '{ext}'. Allowed: {', '.join(settings.ALLOWED_EXTENSIONS)}",
         )
 
-    # 2. Generate secure document identifiers and save path
-    unique_doc_id = f"doc_{uuid.uuid4().hex}"
     safe_filename = sanitize_filename(file.filename)
     stored_filename = f"{unique_doc_id}_{safe_filename}"
     file_path = os.path.abspath(os.path.join(settings.UPLOAD_DIR, stored_filename))
 
-    # Ensure target path stays strictly inside UPLOAD_DIR
     upload_root = os.path.abspath(settings.UPLOAD_DIR)
     if not file_path.startswith(upload_root):
         raise HTTPException(
@@ -84,15 +65,13 @@ async def upload_document(
             detail="Invalid file path detected.",
         )
 
-    # 3. Stream file to disk while enforcing max file size
     bytes_written = 0
-    chunk_size = 1024 * 1024  # 1MB chunk
+    chunk_size = 1024 * 1024  # 1MB chunks
     try:
         with open(file_path, "wb") as destination:
             while chunk := await file.read(chunk_size):
                 bytes_written += len(chunk)
                 if bytes_written > settings.MAX_FILE_SIZE_BYTES:
-                    # Clean up file on breach
                     destination.close()
                     if os.path.exists(file_path):
                         os.remove(file_path)
@@ -111,11 +90,36 @@ async def upload_document(
             detail=f"Failed to write file to disk: {exc}",
         )
 
-    # 4. Insert record into PostgreSQL with PENDING status
+    return file_path
+
+
+@router.post(
+    "/upload",
+    response_model=DocumentUploadResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Upload financial document for asynchronous OCR and classification",
+)
+@limiter.limit(settings.RATE_LIMIT_UPLOAD)
+async def upload_document(
+    request: Request,
+    file: UploadFile = File(..., description="Document file (PDF or Image)"),
+    reference_id: str = Form(..., min_length=1, max_length=64, description="Lending/KYC application reference ID"),
+    callback_url: Optional[str] = Form(None, description="Optional webhook URL for completion notification"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Accepts a KYC or financial document, stores it securely, creates a PENDING
+    record in PostgreSQL, and enqueues an asynchronous processing job to ARQ/Redis.
+    """
+    unique_doc_id = f"doc_{uuid.uuid4().hex}"
+    file_path = await _save_upload_file(file, unique_doc_id)
+
     new_doc = Document(
         document_id=unique_doc_id,
         reference_id=reference_id,
         file_path=file_path,
+        callback_url=callback_url,
         status=DocumentStatus.PENDING,
         category=None,
     )
@@ -123,7 +127,6 @@ async def upload_document(
     await db.commit()
     await db.refresh(new_doc)
 
-    # 5. Enqueue background processing job to ARQ via Redis
     arq_pool = getattr(request.app.state, "arq_redis", None)
     if arq_pool:
         await arq_pool.enqueue_job(
@@ -131,18 +134,77 @@ async def upload_document(
             document_id=unique_doc_id,
             file_path=file_path,
         )
-    else:
-        # Fallback if ARQ redis pool is temporarily detached (logs warning)
-        import logging
-        logging.getLogger("api").warning(
-            "ARQ redis connection pool not attached to app.state. Job %s pending manual worker pickup.",
-            unique_doc_id,
-        )
 
     return DocumentUploadResponse(
         document_id=new_doc.document_id,
         reference_id=new_doc.reference_id,
         status=new_doc.status,
+        callback_url=new_doc.callback_url,
+    )
+
+
+@router.post(
+    "/upload-batch",
+    response_model=BatchUploadResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Upload multiple financial documents in a single batch",
+)
+@limiter.limit(settings.RATE_LIMIT_UPLOAD)
+async def upload_batch(
+    request: Request,
+    files: List[UploadFile] = File(..., description="List of document files (PDF or Images)"),
+    reference_id: str = Form(..., min_length=1, max_length=64, description="Lending/KYC application reference ID"),
+    callback_url: Optional[str] = Form(None, description="Optional webhook URL for notifications"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Accepts a batch of KYC and lending documents under a single reference ID,
+    streams them to storage, creates PENDING records, and dispatches parallel ARQ jobs.
+    """
+    if not files or len(files) == 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No files provided in batch upload.")
+
+    if len(files) > 20:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Maximum 20 files allowed per batch upload.")
+
+    enqueued_items = []
+    arq_pool = getattr(request.app.state, "arq_redis", None)
+
+    for upload_file in files:
+        unique_doc_id = f"doc_{uuid.uuid4().hex}"
+        file_path = await _save_upload_file(upload_file, unique_doc_id)
+
+        new_doc = Document(
+            document_id=unique_doc_id,
+            reference_id=reference_id,
+            file_path=file_path,
+            callback_url=callback_url,
+            status=DocumentStatus.PENDING,
+            category=None,
+        )
+        db.add(new_doc)
+        enqueued_items.append((new_doc, upload_file.filename or "unnamed", file_path))
+
+    await db.commit()
+
+    # Enqueue jobs to ARQ
+    batch_records = []
+    for doc, orig_filename, path in enqueued_items:
+        if arq_pool:
+            await arq_pool.enqueue_job("process_document", document_id=doc.document_id, file_path=path)
+        batch_records.append(
+            BatchUploadItem(
+                document_id=doc.document_id,
+                filename=orig_filename,
+                status=DocumentStatus.PENDING,
+            )
+        )
+
+    return BatchUploadResponse(
+        reference_id=reference_id,
+        total_enqueued=len(batch_records),
+        documents=batch_records,
     )
 
 
@@ -160,7 +222,8 @@ async def get_completed_documents(
 ):
     """
     Returns all COMPLETED documents for the given reference_id,
-    including document_id, a document_url for secure download, and the classified category.
+    including document_id, a document_url for secure download, classified category,
+    confidence score, guess, extracted metadata, and quality score.
     """
     stmt = (
         select(Document)
@@ -184,6 +247,9 @@ async def get_completed_documents(
                 category=doc.category,
                 confidence_score=doc.confidence_score,
                 guess=doc.guess,
+                extracted_metadata=doc.extracted_metadata,
+                quality_score=doc.quality_score,
+                quality_issues=doc.quality_issues,
                 document_url=download_url,
                 created_at=doc.created_at,
                 updated_at=doc.updated_at,
@@ -209,7 +275,6 @@ async def get_reference_documents_status(
     Returns processing status of all documents associated with the reference_id
     including total count and counts breakdown by status (PENDING, PROCESSING, COMPLETED, FAILED).
     """
-    # 1. Fetch document items
     doc_stmt = (
         select(Document)
         .where(Document.reference_id == reference_id)
@@ -218,7 +283,6 @@ async def get_reference_documents_status(
     doc_result = await db.execute(doc_stmt)
     documents = doc_result.scalars().all()
 
-    # 2. Calculate counts by status
     count_stmt = (
         select(Document.status, func.count(Document.id))
         .where(Document.reference_id == reference_id)
@@ -227,7 +291,6 @@ async def get_reference_documents_status(
     count_result = await db.execute(count_stmt)
     status_counts_map = {row[0].value if hasattr(row[0], "value") else str(row[0]): row[1] for row in count_result.all()}
 
-    # Initialize all enum keys so caller always has predictable structure
     counts_by_status = {
         DocumentStatus.PENDING.value: status_counts_map.get(DocumentStatus.PENDING.value, 0),
         DocumentStatus.PROCESSING.value: status_counts_map.get(DocumentStatus.PROCESSING.value, 0),
@@ -242,6 +305,9 @@ async def get_reference_documents_status(
             category=d.category,
             confidence_score=d.confidence_score,
             guess=d.guess,
+            extracted_metadata=d.extracted_metadata,
+            quality_score=d.quality_score,
+            quality_issues=d.quality_issues,
             error_message=d.error_message,
             created_at=d.created_at,
             updated_at=d.updated_at,
@@ -287,7 +353,6 @@ async def download_document(
             detail="Document file missing from storage.",
         )
 
-    # Determine media type based on extension
     filename = os.path.basename(doc.file_path)
     return FileResponse(
         path=doc.file_path,

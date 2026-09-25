@@ -65,7 +65,9 @@ The platform automates the ingestion, text extraction, and strict taxonomy class
 
 ---
 
-## 📋 Strict Taxonomy of Indian Banking Documents
+## 📋 Comprehensive Taxonomy of Indian Banking & NBFC Documents
+
+Built in strict compliance with the **RBI Master Direction on KYC (Updated 2024)**, **PMLA Guidelines**, and Indian commercial banking operations:
 
 | Category Code | Classification Group | Identifying Anchors & Key Characteristics |
 | :--- | :--- | :--- |
@@ -76,38 +78,65 @@ The platform automates the ingestion, text extraction, and strict taxonomy class
 | `NREGA_JOB_CARD` | RBI KYC (OVD) | Mahatma Gandhi NREGA, Job Card Number, State Rural Development, Officer signature. |
 | `NPR_LETTER` | RBI KYC (OVD) | Letter issued by the National Population Register containing name and address details. |
 | `PAN_CARD` | Mandatory Tax KYC | Income Tax Department, Govt of India, 10-digit alphanumeric PAN (`[A-Z]{5}[0-9]{4}[A-Z]`). |
+| `UTILITY_BILL` | RBI Deemed OVD | Electricity, Piped Gas, Water, Postpaid Landline bill (Discoms: BESCOM, Tata Power, etc.). |
+| `PROPERTY_TAX_RECEIPT` | RBI Deemed OVD | Municipal Corporation property tax receipt or assessment order in applicant's name. |
+| `PENSION_PAYMENT_ORDER`| RBI Deemed OVD | Pension or Family Pension Payment Order (PPO) issued to retired employees by Govt/PSUs. |
+| `EMPLOYER_ACCOMMODATION_LETTER` | RBI Deemed OVD | Official allotment letter issued by State/Central Govt, statutory body, PSU, or SCB. |
+| `SALARY_SLIP` | Retail Underwriting | Monthly Payslip, Salary Slip, Basic Pay, HRA, Deductions, Net Salary, Employee ID. |
+| `FORM_16` | Income Appraisal | TDS Certificate under Section 203 of IT Act (Part A TRACES or Part B computation). |
+| `EPFO_PASSBOOK` | Income Verification | Employees' Provident Fund Organisation statement / UAN passbook contribution history. |
+| `BANK_STATEMENT` | Loan Underwriting | Bank Account Statement, Account Number, IFSC, Opening & Closing Balances, Transactions. |
+| `CANCELLED_CHEQUE` | Disbursal / Mandate | Cheque leaf with "CANCELLED" written across, Account Name, Number, IFSC / MICR code. |
+| `NACH_MANDATE` | Loan Servicing | National Automated Clearing House / e-Mandate form signed for recurring EMI debit. |
+| `FD_RECEIPT` | Lien Lending | Fixed Deposit Receipt, Term Deposit Advice, Tenure, Maturity Value, Interest Rate. |
+| `SANCTION_LETTER` | Bank Servicing | Credit Facility Sanction Letter, In-principle Approval, Limit, Rate, EMI, Covenants. |
+| `LOAN_ACCOUNT_STATEMENT` | Servicing / Takeover | Statement of Loan Account, Amortization Schedule, Repayment Ledger from bank/NBFC. |
+| `NO_DUE_CERTIFICATE` | Pre-closure / NOC | No Objection Certificate (NOC) / No Dues Certificate issued on full loan settlement. |
+| `DEMAND_PROMISSORY_NOTE` | Legal Security | DPN executed by borrower promising unconditional repayment of loan on demand. |
 | `GST_RETURN` | Lending & Trade | Form GSTR-1, GSTR-3B, GSTR-9, or GST Registration Certificate (GST REG-06). |
 | `INCOME_TAX_RETURN` | Credit Appraisal | ITR-V, ITR Acknowledgement Number, Assessment Year, Total Income, Computation sheet. |
 | `PURCHASE_ORDER` | Supply Chain Finance | "Purchase Order", "Work Order", PO Number, Line Items, Quantity, Rate, Delivery Terms. |
 | `TAX_INVOICE` | Supply Chain Finance | Commercial / Tax Invoice, Bill of Supply, Supplier & Buyer GSTIN, HSN/SAC, IRN/QR code. |
-| `BANK_STATEMENT` | Loan Underwriting | Bank Account Statement, Account Number, IFSC, Opening & Closing Balances, Transactions. |
 | `AUDITED_FINANCIALS` | Corporate Credit | Balance Sheet, Profit & Loss (P&L) Statement, Notes to Accounts, Auditor's Report. |
-| `BUSINESS_REGISTRATION` | Legal Constitution | Udyam / MSME Registration Certificate, Certificate of Incorporation (CIN / MCA), Partnership Deed. |
-| `UNKNOWN` | Fallback | Illegible, corrupted, non-financial, or unrecognized documents. |
+| `BILL_OF_LADING` | Trade Finance | Ocean Bill of Lading, Air Waybill (AWB), Lorry Receipt (LR) for consignment transport. |
+| `LETTER_OF_CREDIT` | Trade Credit | Irrevocable Letter of Credit (LC), Bank Guarantee (BG), SWIFT MT700/MT760. |
+| `STOCK_STATEMENT` | Working Capital | Monthly DP (Drawing Power) Stock & Book Debt statement submitted to banks. |
+| `BUSINESS_REGISTRATION` | Legal Constitution | Udyam / MSME Registration Certificate, Certificate of Incorporation (CIN / MCA). |
+| `MOA_AOA` | Corporate Legal | Memorandum of Association and Articles of Association registered with ROC. |
+| `BOARD_RESOLUTION` | Corporate Authority | Certified true copy of Board Resolution authorizing credit facilities and signers. |
+| `PARTNERSHIP_DEED` | Firm Constitution | Registered or Notarized Partnership Deed or LLP Agreement. |
+| `TRUST_DEED` | Institutional KYC | Trust Deed, Society Registration Certificate, or Bye-laws for non-profits. |
+| `SHAREHOLDING_PATTERN` | UBO Compliance | Beneficial ownership declaration, list of shareholders holding $\ge 10\%$ equity. |
+| `TITLE_DEED` | Mortgage / Collateral| Registered Sale Deed, Conveyance Deed, Gift Deed, Lease Deed with Sub-Registrar stamp. |
+| `ENCUMBRANCE_CERTIFICATE` | Title Vetting | Form 15/16 Encumbrance Certificate (EC) issued by Sub-Registrar of Assurances. |
+| `PROPERTY_VALUATION_REPORT` | Collateral Sizing | Valuation certificate from Empanelled Valuer / Chartered Engineer. |
+| `LEGAL_AUDIT_REPORT` | Legal Vetting | Title Search Report or Legal Opinion prepared by empanelled advocate. |
+| `FORM_60` | Statutory Tax | Form 60 declaration under Rule 114B of IT Rules (filed when customer has no PAN). |
+| `UNKNOWN` | Fallback | Unclassified non-banking documents (returns confidence 1-100 and best guess). |
 
 ---
 
-## 🔒 Enterprise Security & Storage Controls
+## 🔒 Enterprise Features & Regulatory Safeguards
 
-1. **Dual PDF & Image Support:**
-   * Whitelisted extensions: `.pdf`, `.png`, `.jpg`, `.jpeg`, `.webp`, `.tiff`, `.tif`, `.bmp`.
-   * Enforced file size limit: **100MB** (`104,857,600` bytes).
-   * Stream-to-disk write with path containment verification to eliminate directory traversal risks (`../../`).
-2. **Authentication Mechanism:**
-   * OAuth2 Password Bearer flow with cryptographically signed JWT tokens (HS256).
-   * Active account verification on all protected endpoints.
-3. **Rate Limiting (SlowAPI + Redis):**
-   * Default API: `60 requests/minute`.
-   * Upload Endpoint: `10 uploads/minute` per IP to safeguard GPU memory and LLM capacity against DDoS.
-4. **Host & Origin Isolation:**
-   * `CORSMiddleware`: Restricts incoming traffic to enterprise origins (`localhost:3000`, `localhost:8000`).
-   * `TrustedHostMiddleware`: Restricts accepted Host headers (`localhost`, `127.0.0.1`, `testserver`).
-5. **Security Headers Middleware:**
-   * `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`
-   * `X-Content-Type-Options: nosniff`
-   * `X-Frame-Options: DENY`
-   * `Content-Security-Policy: default-src 'none'; frame-ancestors 'none';`
-   * `Permissions-Policy: camera=(), microphone=(), payment=()`
+1. **Aadhaar Masking (UIDAI & RBI Section 16 Compliance):**
+   * Automatically scans extracted OCR text and masks the first 8 digits of any 12-digit Aadhaar number (`XXXX-XXXX-1234`) or 16-digit Virtual ID before persistent storage.
+2. **Document Quality & Tampering Assessment:**
+   * Vision analysis computing Laplacian variance (blur score), resolution dimensions, and contrast distribution to detect washed-out, blurry, or low-resolution scans.
+3. **Structured Financial Entity Extraction:**
+   * Automatically extracts key fields (PAN number, DOB, GSTINs, IFSC codes, Account Numbers, Invoice Totals, Net Salaries) into `extracted_metadata` JSON.
+4. **Batch Document Upload (`POST /upload-batch`):**
+   * Enables sending up to 20 documents in a single atomic HTTP request under a shared `reference_id`, returning distinct tracking IDs.
+5. **Signed Webhook Callbacks:**
+   * Optional `callback_url` parameter receives an authenticated HTTP POST event containing document status, category, score, and entities, signed with HMAC-SHA256 (`X-Signature-SHA256`).
+6. **Dual PDF & Image Support:**
+   * Whitelisted extensions: `.pdf`, `.png`, `.jpg`, `.jpeg`, `.webp`, `.tiff`, `.tif`, `.bmp` up to **100MB**.
+7. **Rate Limiting & Security Headers:**
+   * SlowAPI Redis rate limiting (`10 uploads/min`), HSTS, CSP, X-Frame-Options: DENY, X-Content-Type-Options: nosniff.
+8. **Host & Origin Isolation:**
+   * `CORSMiddleware` restricts traffic to banking origins (`localhost:3000`, `localhost:8000`).
+   * `TrustedHostMiddleware` restricts accepted Host headers (`localhost`, `127.0.0.1`, `testserver`).
+9. **Authentication & RBAC Readiness:**
+   * OAuth2 Password Bearer flow with cryptographically signed JWT tokens (HS256) and active account checks.
 
 ---
 
@@ -241,24 +270,37 @@ curl -X POST "http://localhost:8000/token" \
 ```bash
 export TOKEN="YOUR_JWT_ACCESS_TOKEN"
 
-# Uploading a PDF (e.g., GSTR-3B Return)
+# 1. Single Document Upload (with optional callback_url)
 curl -X POST "http://localhost:8000/upload" \
   -H "Authorization: Bearer $TOKEN" \
   -F "reference_id=LOAN_APP_2026_001" \
-  -F "file=@sample_dataset/Set_4_GSTR3B_July_2025.pdf"
+  -F "file=@sample_dataset/pan1.png" \
+  -F "callback_url=https://bank.internal/webhooks/kyc"
 
-# Uploading an Image (e.g., PAN Card)
-curl -X POST "http://localhost:8000/upload" \
+# 2. Batch Upload (Atomic multi-document ingestion up to 20 files)
+curl -X POST "http://localhost:8000/upload-batch" \
   -H "Authorization: Bearer $TOKEN" \
   -F "reference_id=LOAN_APP_2026_001" \
-  -F "file=@sample_dataset/pan1.png"
+  -F "files=@sample_dataset/Set_4_GSTR3B_July_2025.pdf" \
+  -F "files=@sample_dataset/pan1.png"
 ```
 **Response (202 Accepted):**
 ```json
 {
-  "document_id": "doc_5669777e34034cf59d92d4cf504164e4",
   "reference_id": "LOAN_APP_2026_001",
-  "status": "PENDING"
+  "total_enqueued": 2,
+  "documents": [
+    {
+      "document_id": "doc_180fb4c2312348079a87f4f64a6d1919",
+      "filename": "Set_4_GSTR3B_July_2025.pdf",
+      "status": "PENDING"
+    },
+    {
+      "document_id": "doc_def48de110ae4153b9a30d2c4ecd3e14",
+      "filename": "pan1.png",
+      "status": "PENDING"
+    }
+  ]
 }
 ```
 
@@ -273,43 +315,44 @@ curl -X GET "http://localhost:8000/documents/LOAN_APP_2026_001/status" \
 ```json
 {
   "reference_id": "LOAN_APP_2026_001",
-  "total_count": 3,
+  "total_count": 2,
   "counts_by_status": {
     "PENDING": 0,
     "PROCESSING": 0,
-    "COMPLETED": 3,
+    "COMPLETED": 2,
     "FAILED": 0
   },
   "documents": [
     {
-      "document_id": "doc_58eb4990f4284049b2024da2cb0aecb3",
+      "document_id": "doc_180fb4c2312348079a87f4f64a6d1919",
       "status": "COMPLETED",
       "category": "GST_RETURN",
       "confidence_score": 100,
       "guess": null,
+      "extracted_metadata": {
+        "gstin": "27AAACR5055K1Z7"
+      },
+      "quality_score": 85,
+      "quality_issues": ["POOR_CONTRAST_OR_GLARE"],
       "error_message": null,
-      "created_at": "2026-09-25T17:48:30Z",
-      "updated_at": "2026-09-25T17:48:33Z"
+      "created_at": "2026-09-25T18:02:00Z",
+      "updated_at": "2026-09-25T18:02:07Z"
     },
     {
-      "document_id": "doc_70d9606f78dd463b8d8e1f253b6fada5",
+      "document_id": "doc_def48de110ae4153b9a30d2c4ecd3e14",
       "status": "COMPLETED",
       "category": "PAN_CARD",
       "confidence_score": 100,
       "guess": null,
+      "extracted_metadata": {
+        "pan_number": "ELWPM8089J",
+        "date_of_birth": "30/01/1997"
+      },
+      "quality_score": 90,
+      "quality_issues": ["MODERATE_RESOLUTION"],
       "error_message": null,
-      "created_at": "2026-09-25T17:48:31Z",
-      "updated_at": "2026-09-25T17:48:35Z"
-    },
-    {
-      "document_id": "doc_39911831a6e9403dac781f5cb4c6094a",
-      "status": "COMPLETED",
-      "category": "UNKNOWN",
-      "confidence_score": 95,
-      "guess": "Electricity / Utility Bill",
-      "error_message": null,
-      "created_at": "2026-09-25T17:48:32Z",
-      "updated_at": "2026-09-25T17:48:38Z"
+      "created_at": "2026-09-25T18:02:00Z",
+      "updated_at": "2026-09-25T18:02:08Z"
     }
   ]
 }

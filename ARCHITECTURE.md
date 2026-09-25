@@ -23,7 +23,7 @@ flowchart TB
 
     subgraph APILayer ["3. FastAPI Application Engine (Async)"]
         AuthRouter["auth.py<br/>POST /token<br/>POST /register<br/>GET /me"]
-        DocRouter["documents.py<br/>POST /upload<br/>GET /documents/{ref_id}<br/>GET /documents/{ref_id}/status<br/>GET /documents/download/{id}"]
+        DocRouter["documents.py<br/>POST /upload<br/>POST /upload-batch<br/>GET /documents/{ref_id}<br/>GET /documents/{ref_id}/status<br/>GET /documents/download/{id}"]
         StorageEngine["Disk Storage Streamer<br/>(Sanitizer, Size Cap 100MB, Path Traversal Guard)"]
         ARQDispatcher["ARQ Pool Producer<br/>(arq.create_pool -> Redis)"]
     end
@@ -173,7 +173,11 @@ erDiagram
         string category "Classified Indian banking taxonomy code (Indexed)"
         int confidence_score "Confidence score 1 to 100"
         string guess "Hypothesis if category is UNKNOWN"
-        string raw_text "Full extracted OCR plain text"
+        string callback_url "Optional webhook callback URL"
+        json extracted_metadata "Structured financial entities (PAN, GSTIN, etc.)"
+        int quality_score "Image quality score 1 to 100"
+        json quality_issues "Detected quality issues (blur, resolution)"
+        string raw_text "UIDAI-masked extracted OCR plain text"
         string error_message "Diagnostic pipeline error message on failure"
         timestamptz created_at "Upload timestamp"
         timestamptz updated_at "Status change / completion timestamp"

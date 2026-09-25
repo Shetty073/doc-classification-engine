@@ -6,6 +6,7 @@ from sqlalchemy import (
     DateTime,
     Enum as SqlEnum,
     Integer,
+    JSON,
     String,
     Text,
     func,
@@ -55,6 +56,10 @@ class Document(Base):
     category = Column(String(100), nullable=True, index=True)
     confidence_score = Column(Integer, nullable=True)  # Confidence scale 1 to 100
     guess = Column(String(255), nullable=True)  # Best guess if category is UNKNOWN
+    callback_url = Column(String(512), nullable=True)  # Webhook notification URL
+    extracted_metadata = Column(JSON, nullable=True)  # Structured extracted entities/fields
+    quality_score = Column(Integer, nullable=True)  # Document image quality (1 to 100)
+    quality_issues = Column(JSON, nullable=True)  # List of detected quality flags
     raw_text = Column(Text, nullable=True)
     error_message = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
