@@ -131,7 +131,7 @@
       "name": "2. Document Ingestion & Classification",
       "item": [
         {
-          "name": "Upload Document (/upload)",
+          "name": "Upload Single Document (/upload)",
           "event": [
             {
               "listen": "test",
@@ -170,9 +170,16 @@
                 },
                 {
                   "key": "file",
-                  "description": "Select PDF or Image file (Aadhaar, PAN, GST Return, PO, Invoice, Balance Sheet)",
+                  "description": "Select PDF or Image file (Aadhaar, PAN, GST Return, PO, Invoice, Balance Sheet, Certificate of Incorporation)",
                   "type": "file",
                   "src": ""
+                },
+                {
+                  "key": "callback_url",
+                  "value": "https://webhook.site/test-callback",
+                  "type": "text",
+                  "disabled": true,
+                  "description": "Optional webhook notification URL triggered on classification completion"
                 }
               ]
             },
@@ -224,6 +231,13 @@
                   "description": "Select multiple files for batch processing",
                   "type": "file",
                   "src": []
+                },
+                {
+                  "key": "callback_url",
+                  "value": "https://webhook.site/test-callback",
+                  "type": "text",
+                  "disabled": true,
+                  "description": "Optional webhook notification URL triggered on completion"
                 }
               ]
             },
@@ -254,7 +268,7 @@
           }
         },
         {
-          "name": "List Completed Documents (/documents/:reference_id)",
+          "name": "List All Documents for Reference (/documents/:reference_id)",
           "request": {
             "method": "GET",
             "header": [
@@ -268,7 +282,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["documents", "{{referenceId}}"]
             },
-            "description": "Returns list of all completed documents for the reference ID, with document_id, category, confidence_score (1-100), guess (for UNKNOWN documents), and secure document_url download link."
+            "description": "Returns full list of all documents (including in-flight PENDING, PROCESSING, COMPLETED, and FAILED) under the reference dossier, with document_id, file_name, status, category, confidence_score (1-100), guess (for UNKNOWN documents), extracted_metadata, quality_score, quality_issues, and secure download link."
           }
         },
         {
@@ -304,7 +318,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["health"]
             },
-            "description": "Liveness probe returning application health and confirming security headers."
+            "description": "Liveness probe returning application health, environment, and confirming security headers."
           }
         }
       ]

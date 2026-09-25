@@ -75,8 +75,8 @@ Classify the given document into EXACTLY ONE category from this comprehensive RB
 4. VOTER_ID: Election Commission of India, EPIC Number, Elector's Name.
 5. NREGA_JOB_CARD: MGNREGA Job Card, State Rural Development.
 6. NPR_LETTER: National Population Register official letter.
-7. PAN_CARD: Income Tax Department, Permanent Account Number, 10-digit PAN (e.g. ABCDE1234F).
-8. UTILITY_BILL: Electricity, Piped Gas, Water, Landline/Postpaid Telephone bill (Deemed OVD, Discom BESCOM, Tata Power, etc.).
+7. PAN_CARD: Physical or electronic PAN card issued by Income Tax Department. MUST be the actual PAN card/slip itself, NOT another document (like Certificate of Incorporation, PO, Invoice, or Bank Statement) that merely quotes the organization's PAN number.
+8. UTILITY_BILL: Electricity, Piped Gas, Water, Landline/Postpaid Telephone bill (Deemed OVD, Discom BESCOM, Tata Power, MSEDCL, etc.).
 9. PROPERTY_TAX_RECEIPT: Municipal Corporation / Municipality property or municipal tax paid receipt.
 10. PENSION_PAYMENT_ORDER: Pension or Family Pension Payment Order (PPO) issued to retired employees.
 11. EMPLOYER_ACCOMMODATION_LETTER: Letter of allotment of accommodation from State/Central Govt, statutory body, PSU, or SCB.
@@ -95,13 +95,13 @@ Classify the given document into EXACTLY ONE category from this comprehensive RB
 24. INCOME_TAX_RETURN: Income Tax Return Acknowledgement, ITR-V, Assessment Year, Total Income.
 25. PURCHASE_ORDER: Purchase Order, Work Order, PO Number, Order Date, Vendor line items.
 26. TAX_INVOICE: Tax Invoice, Commercial Invoice, Bill of Supply, e-Invoice, IRN, HSN/SAC codes.
-27. AUDITED_FINANCIALS: Balance Sheet, Profit & Loss Statement, Auditor's Report, Notes to Accounts.
+27. AUDITED_FINANCIALS: Balance Sheet, Profit & Loss Statement, Auditor's Report, Notes to Accounts, Form 3CA/3CB.
 28. BILL_OF_LADING: Ocean Bill of Lading, Air Waybill (AWB), Lorry Receipt (LR) for goods transport.
 29. LETTER_OF_CREDIT: Irrevocable Letter of Credit (LC), Bank Guarantee (BG), SWIFT MT700.
 30. STOCK_STATEMENT: Monthly DP (Drawing Power) Stock & Book Debt statement submitted to banks.
-31. BUSINESS_REGISTRATION: Udyam/MSME Registration Certificate, Certificate of Incorporation (CIN / MCA).
+31. BUSINESS_REGISTRATION: Certificate of Incorporation (CIN / MCA / Companies House / Registrar of Companies), Udyam / MSME Registration Certificate, Shop & Establishment Act license, GST Registration Certificate (REG-06).
 32. MOA_AOA: Memorandum of Association and Articles of Association of a corporate borrower.
-33. BOARD_RESOLUTION: Certified copy of Board Resolution authorizing credit facilities and signers.
+33. BOARD_RESOLUTION: Certified copy of Board Resolution authorizing credit facilities and signers (passed by Board of Directors, "RESOLVED THAT..."). NOT a Certificate of Incorporation.
 34. PARTNERSHIP_DEED: Registered/Notarized Partnership Deed or LLP Agreement.
 35. TRUST_DEED: Trust Deed, Society Registration Certificate, or Bye-laws for non-profits.
 36. SHAREHOLDING_PATTERN: Beneficial ownership declaration, list of shareholders holding equity.
@@ -119,9 +119,13 @@ SYSTEM_PROMPT = f"""
 OUTPUT FORMAT RULES:
 - Reply ONLY with a single JSON object.
 - The "category" field MUST be one of the recognized categories or "UNKNOWN".
+- A "Certificate of Incorporation" (whether issued by Registrar of Companies, MCA, Companies House, etc.) is BUSINESS_REGISTRATION. It is NEVER PAN_CARD, NEVER BOARD_RESOLUTION, and NEVER UNKNOWN.
+- An "Udyam Registration Certificate" is BUSINESS_REGISTRATION.
+- A "Memorandum of Association" or "Articles of Association" is MOA_AOA.
+- Do NOT classify documents that mention a company's PAN or TAN number (such as Certificate of Incorporation, Purchase Order, Tax Invoice, Bank Statement) as PAN_CARD unless the document itself is a physical or electronic PAN Card issued by the Income Tax Department.
 - Do NOT classify GST returns as BUSINESS_REGISTRATION; use GST_RETURN.
 - Do NOT classify Work Orders as BUSINESS_REGISTRATION; use PURCHASE_ORDER.
-- Do NOT classify Balance Sheets as BUSINESS_REGISTRATION; use AUDITED_FINANCIALS.
+- Do NOT classify Balance Sheets or Audit Reports as BUSINESS_REGISTRATION; use AUDITED_FINANCIALS.
 - Do NOT classify Payslips as UNKNOWN; use SALARY_SLIP.
 - Do NOT classify Electricity Bills as UNKNOWN; use UTILITY_BILL.
 - Do NOT classify Cancelled Cheques as UNKNOWN; use CANCELLED_CHEQUE.
@@ -251,26 +255,33 @@ class LLMClassifierService:
             # Rule reconciliation: Fix category discrepancies based on banking anchors
             if "GSTR" in sub_cat_str or "GSTR" in raw_upper or "GSTR-3B" in src_upper or "GSTR-1" in src_upper or "FORM GSTR" in src_upper:
                 category = "GST_RETURN"
-            elif "BALANCE SHEET" in sub_cat_str or "AUDITED" in sub_cat_str or "BALANCE SHEET" in src_upper:
+            elif "MEMORANDUM OF ASSOCIATION" in src_upper or "ARTICLES OF ASSOCIATION" in src_upper or "MOA & AOA" in sub_cat_str or "MOA" in sub_cat_str:
+                category = "MOA_AOA"
+            elif "CERTIFICATE OF INCORPORATION" in src_upper or "INCORPORATION" in sub_cat_str or "UDYAM" in sub_cat_str or "UDYAM REGISTRATION" in src_upper or "REGISTRAR OF COMPANIES" in src_upper or "MINISTRY OF CORPORATE AFFAIRS" in src_upper:
+                category = "BUSINESS_REGISTRATION"
+            elif "BALANCE SHEET" in sub_cat_str or "AUDITED" in sub_cat_str or "BALANCE SHEET" in src_upper or "AUDIT REPORT" in src_upper:
                 category = "AUDITED_FINANCIALS"
-            elif "WORK ORDER" in sub_cat_str or "PURCHASE ORDER" in sub_cat_str or "WORK ORDER" in src_upper:
+            elif "WORK ORDER" in sub_cat_str or "PURCHASE ORDER" in sub_cat_str or "WORK ORDER" in src_upper or "PURCHASE ORDER" in src_upper:
                 category = "PURCHASE_ORDER"
-            elif "TAX INVOICE" in sub_cat_str or "TAX INVOICE" in src_upper:
+            elif "TAX INVOICE" in sub_cat_str or "TAX INVOICE" in src_upper or "COMMERCIAL INVOICE" in src_upper:
                 category = "TAX_INVOICE"
             elif "PAYSLIP" in sub_cat_str or "SALARY SLIP" in src_upper or "PAY SLIP" in src_upper:
                 category = "SALARY_SLIP"
-            elif "ELECTRICITY" in src_upper or "DISCOM" in src_upper or "POWER DISTRIBUTION" in src_upper or "BESCOM" in src_upper:
+            elif "ELECTRICITY" in src_upper or "DISCOM" in src_upper or "POWER DISTRIBUTION" in src_upper or "BESCOM" in src_upper or "MSEDCL" in src_upper:
                 category = "UTILITY_BILL"
             elif "CANCELLED CHEQUE" in sub_cat_str or "CANCELLED CHEQUE" in src_upper or ("CHEQUE" in src_upper and "CANCELLED" in src_upper):
                 category = "CANCELLED_CHEQUE"
             elif "FORM NO. 16" in src_upper or "FORM 16" in src_upper or "UNDER SECTION 203" in src_upper:
                 category = "FORM_16"
-            elif "PAN" in sub_cat_str or "PERMANENT ACCOUNT NUMBER" in src_upper:
-                category = "PAN_CARD"
             elif "AADHAAR" in sub_cat_str or "MERA AADHAAR" in src_upper or "UIDAI" in src_upper:
                 category = "AADHAAR_CARD"
-            elif "INCORPORATION" in sub_cat_str or "UDYAM" in sub_cat_str:
-                category = "BUSINESS_REGISTRATION"
+            elif "PERMANENT ACCOUNT NUMBER CARD" in src_upper or (
+                "INCOME TAX DEPARTMENT" in src_upper
+                and any(w in src_upper for w in ["FATHER", "DATE OF BIRTH", "SIGNATURE"])
+                and "CERTIFICATE OF INCORPORATION" not in src_upper
+                and "MINISTRY OF CORPORATE AFFAIRS" not in src_upper
+            ):
+                category = "PAN_CARD"
             elif "SANCTION" in sub_cat_str or "SANCTION LETTER" in src_upper:
                 category = "SANCTION_LETTER"
 
@@ -327,11 +338,22 @@ class LLMClassifierService:
         """
         upper_text = text.upper()
 
+        # Corporate Constitution & Business Registration (Prioritized above PAN)
+        if "MEMORANDUM OF ASSOCIATION" in upper_text or "ARTICLES OF ASSOCIATION" in upper_text:
+            return ClassificationResult(category="MOA_AOA", confidence_score=92, confidence=0.92, reasoning="Memorandum / Articles of Association headers present.")
+        if "CERTIFICATE OF INCORPORATION" in upper_text or "REGISTRAR OF COMPANIES" in upper_text or "MINISTRY OF CORPORATE AFFAIRS" in upper_text or "UDYAM REGISTRATION" in upper_text:
+            return ClassificationResult(category="BUSINESS_REGISTRATION", confidence_score=95, confidence=0.95, reasoning="Certificate of Incorporation / Udyam registration anchors present.")
+
         # OVDs
         if "AADHAAR" in upper_text or "UIDAI" in upper_text or "MERA AADHAAR" in upper_text:
             return ClassificationResult(category="AADHAAR_CARD", confidence_score=92, confidence=0.92, reasoning="UIDAI / Aadhaar anchor terms present.")
-        if "INCOME TAX DEPARTMENT" in upper_text and ("PERMANENT ACCOUNT NUMBER" in upper_text or "PAN" in upper_text):
-            return ClassificationResult(category="PAN_CARD", confidence_score=92, confidence=0.92, reasoning="Income Tax Department / PAN anchors present.")
+        if "PERMANENT ACCOUNT NUMBER CARD" in upper_text or (
+            "INCOME TAX DEPARTMENT" in upper_text
+            and any(w in upper_text for w in ["FATHER", "DATE OF BIRTH", "DOB", "SIGNATURE"])
+            and "CERTIFICATE OF INCORPORATION" not in upper_text
+            and "MINISTRY OF CORPORATE AFFAIRS" not in upper_text
+        ):
+            return ClassificationResult(category="PAN_CARD", confidence_score=95, confidence=0.95, reasoning="Income Tax Department PAN Card anchors present.")
         if "ELECTION COMMISSION OF INDIA" in upper_text or ("IDENTITY CARD" in upper_text and "EPIC" in upper_text):
             return ClassificationResult(category="VOTER_ID", confidence_score=90, confidence=0.90, reasoning="Election Commission / EPIC anchors present.")
         if "DRIVING LICENCE" in upper_text or "UNION OF INDIA DRIVING LICENCE" in upper_text:
@@ -358,13 +380,11 @@ class LLMClassifierService:
             return ClassificationResult(category="CANCELLED_CHEQUE", confidence_score=92, confidence=0.92, reasoning="Cancelled Cheque anchors present.")
         if "SANCTION LETTER" in upper_text or "CREDIT FACILITY SANCTION" in upper_text or "IN-PRINCIPLE APPROVAL" in upper_text:
             return ClassificationResult(category="SANCTION_LETTER", confidence_score=90, confidence=0.90, reasoning="Loan Sanction Letter anchors present.")
-        if "BALANCE SHEET" in upper_text or "PROFIT AND LOSS" in upper_text or "AUDITOR'S REPORT" in upper_text:
+        if "BALANCE SHEET" in upper_text or "PROFIT AND LOSS" in upper_text or "AUDITOR'S REPORT" in upper_text or "AUDIT REPORT" in upper_text:
             return ClassificationResult(category="AUDITED_FINANCIALS", confidence_score=90, confidence=0.90, reasoning="Balance Sheet / Financial Statement headers present.")
-        if "UDYAM REGISTRATION" in upper_text or "MINISTRY OF MICRO, SMALL" in upper_text or "CERTIFICATE OF INCORPORATION" in upper_text:
-            return ClassificationResult(category="BUSINESS_REGISTRATION", confidence_score=90, confidence=0.90, reasoning="Udyam / Incorporation registration anchors present.")
 
         # Deemed OVDs
-        if any(w in upper_text for w in ["ELECTRICITY BILL", "POWER DISTRIBUTION", "BESCOM", "TNEB", "DISCOM", "KWH", "METER READING", "CONSUMER NUMBER"]):
+        if any(w in upper_text for w in ["ELECTRICITY BILL", "POWER DISTRIBUTION", "BESCOM", "TNEB", "DISCOM", "MSEDCL", "KWH", "METER READING", "CONSUMER NUMBER"]):
             return ClassificationResult(category="UTILITY_BILL", confidence_score=90, confidence=0.90, reasoning="Utility / Electricity bill anchors present.")
 
         # Fallback to UNKNOWN

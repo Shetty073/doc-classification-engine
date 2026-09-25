@@ -61,6 +61,8 @@ class BatchUploadResponse(BaseModel):
 class CompletedDocumentItem(BaseModel):
     document_id: str
     reference_id: str
+    file_name: Optional[str] = None
+    status: DocumentStatus = DocumentStatus.COMPLETED
     category: Optional[str] = None
     confidence_score: Optional[int] = Field(default=None, ge=1, le=100, description="Confidence score between 1 and 100")
     guess: Optional[str] = Field(default=None, description="Heuristic/LLM guess if document is UNKNOWN")
@@ -68,6 +70,7 @@ class CompletedDocumentItem(BaseModel):
     quality_score: Optional[int] = Field(default=None, ge=1, le=100, description="Document image quality score")
     quality_issues: Optional[List[str]] = Field(default=None, description="Quality issue flags")
     document_url: str
+    raw_text: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -76,6 +79,7 @@ class CompletedDocumentItem(BaseModel):
 
 class DocumentStatusSummaryItem(BaseModel):
     document_id: str
+    file_name: Optional[str] = None
     status: DocumentStatus
     category: Optional[str] = None
     confidence_score: Optional[int] = Field(default=None, ge=1, le=100, description="Confidence score between 1 and 100")
@@ -84,6 +88,7 @@ class DocumentStatusSummaryItem(BaseModel):
     quality_score: Optional[int] = Field(default=None, ge=1, le=100, description="Document image quality score")
     quality_issues: Optional[List[str]] = Field(default=None, description="Quality issue flags")
     error_message: Optional[str] = None
+    raw_text: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

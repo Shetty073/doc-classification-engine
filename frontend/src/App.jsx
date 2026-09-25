@@ -1,31 +1,32 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { 
-  ShieldCheck, 
-  UploadCloud, 
-  FileText, 
-  FileSpreadsheet, 
-  Image as ImageIcon, 
-  Download, 
-  RefreshCw, 
-  CheckCircle2, 
-  Clock, 
-  AlertTriangle, 
-  XCircle, 
-  Lock, 
-  LogOut, 
-  Sparkles, 
-  FileCheck2, 
-  Search, 
-  Zap, 
-  Activity,
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import {
+  FileText,
+  CheckCircle2,
+  Clock,
+  AlertCircle,
+  XCircle,
+  Search,
+  Download,
+  RefreshCw,
+  Eye,
+  Copy,
+  Check,
+  Upload,
   Layers,
-  HelpCircle
+  ShieldCheck,
+  LogOut,
+  ChevronRight,
+  X,
+  LayoutGrid,
+  LayoutList,
+  Filter,
+  FileCheck,
+  Building2,
+  Server
 } from 'lucide-react';
 
-const API_BASE = ''; // Proxied via Vite dev server or direct origin
-
 export default function App() {
-  // Auth state
+  // Authentication State
   const [token, setToken] = useState(() => localStorage.getItem('doc_access_token') || '');
   const [user, setUser] = useState(() => localStorage.getItem('doc_username') || '');
   const [loginUsername, setLoginUsername] = useState('admin');
@@ -33,40 +34,92 @@ export default function App() {
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
 
-  // App state
+  // Application Data State
   const [referenceId, setReferenceId] = useState('LOAN_APP_2026_MUM_001');
+  const [inputReferenceId, setInputReferenceId] = useState('LOAN_APP_2026_MUM_001');
   const [statusSummary, setStatusSummary] = useState(null);
   const [completedDocs, setCompletedDocs] = useState([]);
   const [loadingDocs, setLoadingDocs] = useState(false);
+  const [lastRefreshed, setLastRefreshed] = useState(new Date());
+
+  // Upload & File Ingestion
   const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState('');
+  const [uploadQueue, setUploadQueue] = useState([]);
   const [callbackUrl, setCallbackUrl] = useState('');
+  const [showWebhookField, setShowWebhookField] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+
+  // Filters & Views
+  const [searchTerm, setSearchTerm] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [viewMode, setViewMode] = useState('table'); // 'table' or 'grid'
+
+  // Document Inspector Drawer
+  const [inspectDoc, setInspectDoc] = useState(null);
+  const [drawerTab, setDrawerTab] = useState('overview'); // 'overview', 'entities', 'quality', 'ocr'
+  const [copiedKey, setCopiedKey] = useState('');
+
+  // System Diagnostics
   const [systemHealth, setSystemHealth] = useState(null);
 
   const fileInputRef = useRef(null);
 
-  // Verify health on mount
+  // Check backend health
   useEffect(() => {
-    fetch('/health')
-      .then(res => res.json())
-      .then(data => setSystemHealth(data))
-      .catch(() => setSystemHealth({ status: 'unreachable' }));
+    const checkHealth = () => {
+      fetch('/health')
+        .then(res => res.json())
+        .then(data => setSystemHealth(data))
+        .catch(() => setSystemHealth({ status: 'offline' }));
+    };
+    checkHealth();
+    const interval = setInterval(checkHealth, 30000);
+    return () => clearInterval(interval);
   }, []);
 
-  // Fetch documents when referenceId or token changes
+  // Fetch documents for the active reference
+  const fetchReferenceData = async (isBackground = false) => {
+    if (!token || !referenceId) return;
+    if (!isBackground) setLoadingDocs(true);
+
+    try {
+      const headers = { Authorization: `Bearer ${token}` };
+
+      // 1. Overview status summary
+      const statusRes = await fetch(`/documents/${referenceId}/status`, { headers });
+      if (statusRes.ok) {
+        const sData = await statusRes.json();
+        setStatusSummary(sData);
+      }
+
+      // 2. Full documents listing
+      const docsRes = await fetch(`/documents/${referenceId}`, { headers });
+      if (docsRes.ok) {
+        const cData = await docsRes.json();
+        setCompletedDocs(cData);
+      }
+      setLastRefreshed(new Date());
+    } catch (err) {
+      console.error('Failed to fetch reference data:', err);
+    } finally {
+      if (!isBackground) setLoadingDocs(false);
+    }
+  };
+
   useEffect(() => {
     if (!token || !referenceId) return;
     fetchReferenceData();
 
-    // Auto-polling interval if documents are processing
-    const interval = setInterval(() => {
+    // Auto-polling for in-flight tasks
+    const pollInterval = setInterval(() => {
       fetchReferenceData(true);
     }, 2500);
 
-    return () => clearInterval(interval);
+    return () => clearInterval(pollInterval);
   }, [token, referenceId]);
 
+  // Auth Handler
   const handleLogin = async (e) => {
     if (e) e.preventDefault();
     setAuthLoading(true);
@@ -107,42 +160,31 @@ export default function App() {
     localStorage.removeItem('doc_username');
   };
 
-  const fetchReferenceData = async (isBackground = false) => {
-    if (!isBackground) setLoadingDocs(true);
-
-    try {
-      const headers = { Authorization: `Bearer ${token}` };
-
-      // 1. Fetch overview status
-      const statusRes = await fetch(`/documents/${referenceId}/status`, { headers });
-      if (statusRes.ok) {
-        const sData = await statusRes.json();
-        setStatusSummary(sData);
-      }
-
-      // 2. Fetch completed documents with download URLs and metadata
-      const docsRes = await fetch(`/documents/${referenceId}`, { headers });
-      if (docsRes.ok) {
-        const cData = await docsRes.json();
-        setCompletedDocs(cData);
-      }
-    } catch (err) {
-      console.error('Error fetching documents:', err);
-    } finally {
-      if (!isBackground) setLoadingDocs(false);
+  // Switch Reference
+  const handleReferenceSubmit = (e) => {
+    e.preventDefault();
+    if (inputReferenceId.trim()) {
+      setReferenceId(inputReferenceId.trim());
     }
   };
 
-  const handleFileUpload = async (files) => {
+  // Upload Handlers
+  const handleFiles = async (files) => {
     if (!files || files.length === 0) return;
     setUploading(true);
-    setUploadProgress(`Uploading ${files.length} document(s)...`);
+
+    const queueItems = Array.from(files).map(f => ({
+      name: f.name,
+      size: (f.size / 1024).toFixed(1) + ' KB',
+      status: 'Uploading...'
+    }));
+    setUploadQueue(queueItems);
 
     try {
       const headers = { Authorization: `Bearer ${token}` };
 
       if (files.length === 1) {
-        // Single Upload
+        // Single file endpoint
         const formData = new FormData();
         formData.append('file', files[0]);
         formData.append('reference_id', referenceId);
@@ -159,11 +201,9 @@ export default function App() {
           throw new Error(err.detail || 'Upload failed');
         }
       } else {
-        // Batch Upload
+        // Batch endpoint
         const formData = new FormData();
-        for (let i = 0; i < files.length; i++) {
-          formData.append('files', files[i]);
-        }
+        Array.from(files).forEach(f => formData.append('files', f));
         formData.append('reference_id', referenceId);
         if (callbackUrl.trim()) formData.append('callback_url', callbackUrl.trim());
 
@@ -179,40 +219,18 @@ export default function App() {
         }
       }
 
-      setUploadProgress('Files enqueued successfully! Analyzing OCR & Classification...');
-      await fetchReferenceData();
-      setTimeout(() => setUploadProgress(''), 3000);
+      // Refresh table immediately
+      setTimeout(() => {
+        fetchReferenceData();
+        setUploadQueue([]);
+      }, 1000);
     } catch (err) {
-      alert(`Upload Error: ${err.message}`);
-      setUploadProgress('');
+      alert(`Upload error: ${err.message}`);
     } finally {
       setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
-  const handleDownload = async (docId) => {
-    try {
-      const res = await fetch(`/documents/download/${docId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('Failed to download document');
-
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${docId}_document`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-    } catch (err) {
-      alert(`Download Error: ${err.message}`);
-    }
-  };
-
-  // Drag & drop handlers
   const handleDrag = (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -227,449 +245,933 @@ export default function App() {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      handleFileUpload(e.dataTransfer.files);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleFiles(e.dataTransfer.files);
     }
   };
 
-  // Helper formatting
-  const getCategoryColor = (cat) => {
-    if (!cat) return 'badge-info';
-    if (cat === 'UNKNOWN') return 'badge-warning';
-    if (cat.includes('CARD') || cat === 'PASSPORT' || cat.includes('LICENCE') || cat === 'VOTER_ID') return 'badge-purple';
-    if (cat.includes('GST') || cat.includes('TAX') || cat.includes('INVOICE') || cat.includes('FINANCIALS')) return 'badge-success';
-    if (cat.includes('STATEMENT') || cat.includes('CHEQUE') || cat.includes('MANDATE')) return 'badge-info';
-    return 'badge-success';
+  const triggerDownload = (docId) => {
+    const downloadUrl = `/documents/${docId}/download`;
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.setAttribute('download', '');
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
   };
 
-  const getStatusBadge = (status) => {
-    switch (status) {
-      case 'COMPLETED':
-        return <span className="badge badge-success"><CheckCircle2 size={13} /> Completed</span>;
-      case 'PROCESSING':
-        return <span className="badge badge-warning animate-pulse-glow"><Clock size={13} /> Processing...</span>;
-      case 'PENDING':
-        return <span className="badge badge-info"><Clock size={13} /> Pending</span>;
-      case 'FAILED':
-        return <span className="badge badge-danger"><XCircle size={13} /> Failed</span>;
-      default:
-        return <span className="badge badge-info">{status}</span>;
+  const copyToClipboard = (text, key) => {
+    navigator.clipboard.writeText(text);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(''), 2000);
+  };
+
+  // Filtered Documents
+  const filteredDocs = useMemo(() => {
+    return completedDocs.filter(doc => {
+      const matchSearch =
+        !searchTerm ||
+        (doc.file_name && doc.file_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (doc.file_path && doc.file_path.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (doc.document_id && doc.document_id.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (doc.category && doc.category.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (doc.extracted_metadata && JSON.stringify(doc.extracted_metadata).toLowerCase().includes(searchTerm.toLowerCase()));
+
+      const matchCategory =
+        categoryFilter === 'ALL' ||
+        doc.category === categoryFilter;
+
+      const matchStatus =
+        statusFilter === 'ALL' ||
+        doc.status === statusFilter;
+
+      return matchSearch && matchCategory && matchStatus;
+    });
+  }, [completedDocs, searchTerm, categoryFilter, statusFilter]);
+
+  // Metrics Calculations
+  const metrics = useMemo(() => {
+    const total = completedDocs.length;
+    const completed = completedDocs.filter(d => d.status === 'COMPLETED').length;
+    const inProgress = completedDocs.filter(d => d.status === 'PENDING' || d.status === 'PROCESSING').length;
+    const highConf = completedDocs.filter(d => (d.confidence_score || 0) >= 85).length;
+    const autoRate = completed > 0 ? Math.round((highConf / completed) * 100) : 0;
+
+    const scores = completedDocs.filter(d => d.quality_score != null).map(d => d.quality_score);
+    const avgQuality = scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 95;
+
+    const issuesCount = completedDocs.reduce((acc, d) => {
+      const issues = d.quality_issues || [];
+      return acc + (issues.length > 0 ? 1 : 0);
+    }, 0);
+
+    return { total, completed, inProgress, autoRate, avgQuality, issuesCount };
+  }, [completedDocs]);
+
+  // Extract clean filename from doc or file_path
+  const getCleanFilename = (item) => {
+    if (!item) return 'document.pdf';
+    if (typeof item === 'object') {
+      if (item.file_name) return item.file_name;
+      item = item.file_path || '';
     }
+    const parts = String(item).replace(/\\/g, '/').split('/');
+    const raw = parts[parts.length - 1];
+    const clean = raw.replace(/^doc_[a-f0-9]{32}_/, '');
+    return clean || raw || 'document.pdf';
   };
 
-  // Combine items from status summary and completed details for rich UI
-  const allDocuments = statusSummary?.documents || [];
-  const completedMap = new Map(completedDocs.map(d => [d.document_id, d]));
+  // Available categories for filter dropdown
+  const availableCategories = useMemo(() => {
+    const set = new Set();
+    completedDocs.forEach(d => {
+      if (d.category) set.add(d.category);
+    });
+    return Array.from(set).sort();
+  }, [completedDocs]);
 
-  // Merge metadata & URL
-  const displayDocs = allDocuments.map(item => {
-    const comp = completedMap.get(item.document_id);
-    return {
-      ...item,
-      document_url: comp?.document_url,
-      extracted_metadata: comp?.extracted_metadata || item.extracted_metadata || {},
-      quality_score: comp?.quality_score ?? item.quality_score,
-      quality_issues: comp?.quality_issues || item.quality_issues || [],
-      guess: comp?.guess || item.guess,
-      confidence_score: comp?.confidence_score ?? item.confidence_score,
-    };
-  });
+  // If unauthenticated, show clean Enterprise Login
+  if (!token) {
+    return (
+      <div className="login-container">
+        <div className="login-card">
+          <div className="login-header">
+            <div className="login-logo">
+              <Building2 size={24} />
+            </div>
+            <div>
+              <h1 className="login-title">DocIntelligence Enterprise</h1>
+              <p className="login-subtitle">RBI & Banking Document Classification Gateway</p>
+            </div>
+          </div>
+
+          {authError && (
+            <div style={{
+              background: 'var(--danger-bg)',
+              border: '1px solid var(--danger-border)',
+              color: 'var(--danger-text)',
+              padding: '0.65rem 0.85rem',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: '0.8rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem'
+            }}>
+              <AlertCircle size={16} />
+              <span>{authError}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div className="form-group">
+              <label className="form-label">Username</label>
+              <input
+                type="text"
+                className="form-input"
+                value={loginUsername}
+                onChange={e => setLoginUsername(e.target.value)}
+                placeholder="Enter authorized username"
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Password</label>
+              <input
+                type="password"
+                className="form-input"
+                value={loginPassword}
+                onChange={e => setLoginPassword(e.target.value)}
+                placeholder="Enter password"
+                required
+              />
+            </div>
+
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={authLoading}
+              style={{ marginTop: '0.5rem', padding: '0.65rem' }}
+            >
+              {authLoading ? 'Verifying Credentials...' : 'Sign In to Banking Workspace'}
+            </button>
+          </form>
+
+          <div className="login-compliance-badge">
+            <ShieldCheck size={16} style={{ color: 'var(--success)' }} />
+            <span>OAuth2 JWT Enclave • RBI KYC / PMLA Master Direction</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app-container">
-      {/* 1. Header Navigation */}
-      <nav className="navbar">
-        <div className="nav-brand">
-          <div className="brand-icon">
-            <ShieldCheck size={24} color="#fff" />
+      {/* 1. Enterprise Top Navigation Bar */}
+      <header className="enterprise-header">
+        <div className="header-left">
+          <div className="brand-badge">
+            <div className="brand-icon-box">
+              <Building2 size={18} />
+            </div>
+            <div className="brand-title-wrap">
+              <span className="brand-name">DocClassify Gateway</span>
+              <span className="brand-tag">Banking Intelligence • Enterprise v2.4</span>
+            </div>
           </div>
-          <div>
-            <div className="brand-title">DocClassifier AI</div>
-            <div className="brand-subtitle">Indian Banking & KYC Document Intelligence</div>
+
+          <div className="header-divider" />
+
+          <div className="system-status-indicator">
+            <span className={`status-dot ${systemHealth?.status === 'ok' ? '' : 'offline'}`} />
+            <span>Service Node: {systemHealth?.status === 'ok' ? 'Online' : 'Degraded'}</span>
           </div>
         </div>
 
-        <div className="nav-actions">
-          {systemHealth && (
-            <div className="badge badge-success" title="Local FastAPI & Security Middleware Active">
-              <Activity size={12} /> {systemHealth.service ? 'System Healthy' : 'Online'}
-            </div>
-          )}
+        <div className="header-right">
+          <div className="tenant-pill">
+            <Server size={13} />
+            <span>REGION: AP-SOUTH-1</span>
+          </div>
 
-          {token ? (
-            <>
-              <div className="meta-chip">
-                <Lock size={12} /> Operator: <strong style={{ color: '#fff' }}>{user}</strong>
+          <div className="user-profile-menu">
+            <div className="user-avatar-pill">
+              <div className="avatar-circle">
+                {user.charAt(0).toUpperCase()}
               </div>
-              <button className="btn btn-secondary btn-sm btn-danger" onClick={handleLogout} title="Log Out">
-                <LogOut size={14} /> Logout
-              </button>
-            </>
-          ) : (
-            <button className="btn btn-primary btn-sm" onClick={() => handleLogin(null)}>
-              Sign In
+              <span>{user}</span>
+            </div>
+
+            <button
+              onClick={handleLogout}
+              className="btn-icon"
+              title="Sign Out"
+              aria-label="Sign Out"
+            >
+              <LogOut size={15} />
             </button>
-          )}
+          </div>
         </div>
-      </nav>
+      </header>
 
-      {/* 2. Login Modal if unauthenticated */}
-      {!token && (
-        <div className="login-overlay">
-          <div className="glass-panel login-card">
-            <div className="dropzone-icon" style={{ marginBottom: '1.25rem' }}>
-              <Lock size={28} />
+      {/* 2. Main Content Body */}
+      <main className="main-wrapper">
+        {/* KPI Summary Tiles */}
+        <section className="metrics-row">
+          <div className="metric-card">
+            <div className="metric-label-row">
+              <span>Total Documents</span>
+              <Layers size={15} style={{ color: 'var(--primary)' }} />
             </div>
-            <h2 style={{ fontFamily: 'var(--font-heading)', marginBottom: '0.5rem' }}>Banking Portal Sign In</h2>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginBottom: '1.75rem' }}>
-              Authorized operator access for RBI KYC, Loan Underwriting, and Supply Chain Document Classification.
-            </p>
+            <div className="metric-value-row">
+              <span className="metric-value">{metrics.total}</span>
+              <span className="metric-subtext">files in dossier</span>
+            </div>
+          </div>
 
-            {authError && (
-              <div className="badge badge-danger" style={{ display: 'flex', marginBottom: '1rem', padding: '0.6rem' }}>
-                <AlertTriangle size={14} /> {authError}
+          <div className="metric-card">
+            <div className="metric-label-row">
+              <span>In Processing</span>
+              <Clock size={15} style={{ color: metrics.inProgress > 0 ? '#38bdf8' : 'var(--text-muted)' }} />
+            </div>
+            <div className="metric-value-row">
+              <span className="metric-value" style={{ color: metrics.inProgress > 0 ? '#38bdf8' : 'inherit' }}>
+                {metrics.inProgress}
+              </span>
+              <span className="metric-subtext">{metrics.inProgress > 0 ? 'analyzing pipeline' : 'all jobs finished'}</span>
+            </div>
+          </div>
+
+          <div className="metric-card">
+            <div className="metric-label-row">
+              <span>Auto-Classification</span>
+              <CheckCircle2 size={15} style={{ color: 'var(--success)' }} />
+            </div>
+            <div className="metric-value-row">
+              <span className="metric-value">{metrics.autoRate}%</span>
+              <span className="metric-subtext">{metrics.completed} classified</span>
+            </div>
+          </div>
+
+          <div className="metric-card">
+            <div className="metric-label-row">
+              <span>Avg Quality Score</span>
+              <FileCheck size={15} style={{ color: 'var(--info)' }} />
+            </div>
+            <div className="metric-value-row">
+              <span className="metric-value">{metrics.avgQuality}</span>
+              <span className="metric-subtext">/100 OCR clarity</span>
+            </div>
+          </div>
+        </section>
+
+        {/* Reference / Portfolio Workspace Switcher */}
+        <section className="control-bar">
+          <form onSubmit={handleReferenceSubmit} className="control-bar-left">
+            <div className="ref-input-group">
+              <span className="ref-label">PORTFOLIO REF:</span>
+              <input
+                type="text"
+                className="ref-input"
+                value={inputReferenceId}
+                onChange={e => setInputReferenceId(e.target.value)}
+                placeholder="e.g. LOAN_APP_2026_MUM_001"
+              />
+            </div>
+            <button type="submit" className="btn btn-secondary">
+              Load Dossier
+            </button>
+          </form>
+
+          <div className="control-bar-right">
+            <button
+              onClick={() => fetchReferenceData()}
+              className="btn btn-secondary"
+              disabled={loadingDocs}
+              title="Refresh Dossier Data"
+            >
+              <RefreshCw size={14} className={loadingDocs ? 'spin' : ''} />
+              <span>{loadingDocs ? 'Refreshing...' : 'Refresh'}</span>
+            </button>
+          </div>
+        </section>
+
+        {/* Ingestion & Upload Section */}
+        <section className="ingestion-panel">
+          <div className="panel-header">
+            <div>
+              <h2 className="panel-title">
+                <Upload size={16} />
+                <span>Document Ingestion Gateway</span>
+              </h2>
+              <p className="panel-subtitle">Upload borrower verification documents, tax forms, or company registrations.</p>
+            </div>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ fontSize: '0.75rem' }}
+              onClick={() => setShowWebhookField(!showWebhookField)}
+            >
+              {showWebhookField ? 'Hide Webhook Config' : 'Configure Webhook Callback'}
+            </button>
+          </div>
+
+          {showWebhookField && (
+            <div className="webhook-row">
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Webhook URL:</span>
+              <input
+                type="url"
+                className="webhook-input"
+                placeholder="https://your-bank-core.internal/api/v1/callbacks/documents"
+                value={callbackUrl}
+                onChange={e => setCallbackUrl(e.target.value)}
+              />
+            </div>
+          )}
+
+          <div
+            className={`dropzone ${dragActive ? 'active' : ''}`}
+            onDragEnter={handleDrag}
+            onDragLeave={handleDrag}
+            onDragOver={handleDrag}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current && fileInputRef.current.click()}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept=".pdf,.png,.jpg,.jpeg,.tiff"
+              style={{ display: 'none' }}
+              onChange={e => {
+                if (e.target.files && e.target.files.length > 0) {
+                  handleFiles(e.target.files);
+                }
+                e.target.value = '';
+              }}
+            />
+            <div>
+              <p className="dropzone-text-primary">Click to select documents or drag & drop files here</p>
+              <p className="dropzone-text-secondary">Direct support for PDF, PNG, JPG, and multi-page corporate filings</p>
+            </div>
+            <div className="dropzone-badges">
+              <span className="drop-badge">PDF</span>
+              <span className="drop-badge">PNG</span>
+              <span className="drop-badge">JPG</span>
+              <span className="drop-badge">MAX 50MB</span>
+            </div>
+          </div>
+
+          {uploading && (
+            <div className="upload-queue-card">
+              <div className="upload-info">
+                <RefreshCw size={16} className="spin" style={{ color: 'var(--primary)' }} />
+                <span>Ingesting documents into classification pipeline...</span>
               </div>
-            )}
+              <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
+                {uploadQueue.length} files queued
+              </span>
+            </div>
+          )}
+        </section>
 
-            <form onSubmit={handleLogin}>
-              <div className="input-group">
-                <label className="input-label">Operator Username</label>
+        {/* Document Explorer / Table View */}
+        <section className="documents-section">
+          {/* Table Toolbar */}
+          <div className="table-toolbar">
+            <div className="toolbar-filters">
+              <div className="search-input-wrap">
+                <Search size={14} style={{ color: 'var(--text-muted)' }} />
                 <input
                   type="text"
-                  className="input-field"
-                  value={loginUsername}
-                  onChange={(e) => setLoginUsername(e.target.value)}
-                  required
+                  className="search-input"
+                  placeholder="Filter by name, ID, PAN, GSTIN..."
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
                 />
+                {searchTerm && (
+                  <button
+                    onClick={() => setSearchTerm('')}
+                    style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+                  >
+                    <X size={13} />
+                  </button>
+                )}
               </div>
 
-              <div className="input-group">
-                <label className="input-label">Password</label>
-                <input
-                  type="password"
-                  className="input-field"
-                  value={loginPassword}
-                  onChange={(e) => setLoginPassword(e.target.value)}
-                  required
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="btn btn-primary"
-                style={{ width: '100%', marginTop: '0.75rem' }}
-                disabled={authLoading}
+              <select
+                className="filter-select"
+                value={categoryFilter}
+                onChange={e => setCategoryFilter(e.target.value)}
               >
-                {authLoading ? <span className="spinner" /> : <><Sparkles size={16} /> Authenticate & Open Dashboard</>}
-              </button>
-            </form>
+                <option value="ALL">All Categories</option>
+                {availableCategories.map(cat => (
+                  <option key={cat} value={cat}>{cat}</option>
+                ))}
+              </select>
 
-            <div style={{ marginTop: '1.5rem', paddingTop: '1.25rem', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                style={{ width: '100%' }}
-                onClick={() => {
-                  setLoginUsername('admin');
-                  setLoginPassword('admin_secure_pass123');
-                  handleLogin(null);
-                }}
+              <select
+                className="filter-select"
+                value={statusFilter}
+                onChange={e => setStatusFilter(e.target.value)}
               >
-                <Zap size={14} color="#f59e0b" /> Quick 1-Click Demo Login (admin)
-              </button>
+                <option value="ALL">All Statuses</option>
+                <option value="COMPLETED">Completed</option>
+                <option value="PROCESSING">Processing</option>
+                <option value="FAILED">Failed</option>
+              </select>
             </div>
-          </div>
-        </div>
-      )}
 
-      {/* 3. Main Dashboard Content */}
-      {token && (
-        <main className="main-content">
-          {/* Reference ID Bar & Selector */}
-          <div className="glass-panel" style={{ padding: '1.25rem 1.5rem', marginBottom: '1.75rem' }}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flex: 1, minWidth: '300px' }}>
-                <Layers size={20} color="var(--primary)" />
-                <div style={{ flex: 1 }}>
-                  <label className="input-label">Active KYC / Lending Dossier Reference ID</label>
-                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
-                    <input
-                      type="text"
-                      className="input-field"
-                      style={{ padding: '0.5rem 0.8rem' }}
-                      value={referenceId}
-                      onChange={(e) => setReferenceId(e.target.value)}
-                      placeholder="e.g. LOAN_APP_2026_001"
-                    />
-                    <button 
-                      className="btn btn-secondary btn-sm" 
-                      onClick={() => setReferenceId(`REF_KYC_${Date.now().toString().slice(-6)}`)}
-                      title="Generate new unique Application Reference ID"
-                    >
-                      New Dossier
-                    </button>
-                  </div>
-                </div>
-              </div>
+            <div className="toolbar-actions">
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginRight: '0.5rem' }}>
+                Showing {filteredDocs.length} of {completedDocs.length}
+              </span>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <div className="view-toggle-group">
                 <button
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => fetchReferenceData()}
-                  disabled={loadingDocs}
+                  className={`view-toggle-btn ${viewMode === 'table' ? 'active' : ''}`}
+                  onClick={() => setViewMode('table')}
+                  title="Table View"
                 >
-                  <RefreshCw size={14} className={loadingDocs ? 'spinner' : ''} /> Refresh
+                  <LayoutList size={15} />
+                </button>
+                <button
+                  className={`view-toggle-btn ${viewMode === 'grid' ? 'active' : ''}`}
+                  onClick={() => setViewMode('grid')}
+                  title="Grid View"
+                >
+                  <LayoutGrid size={15} />
                 </button>
               </div>
             </div>
           </div>
 
-          {/* Metrics Ribbon */}
-          {statusSummary && (
-            <div className="metrics-ribbon">
-              <div className="glass-panel metric-card">
-                <div>
-                  <div className="metric-label">Total Dossier Docs</div>
-                  <div className="metric-value">{statusSummary.total_count}</div>
-                </div>
-                <Layers size={32} color="var(--primary)" opacity={0.7} />
+          {/* Empty State */}
+          {filteredDocs.length === 0 ? (
+            <div className="empty-table-state">
+              <div className="empty-icon-wrap">
+                <FileText size={24} />
               </div>
-
-              <div className="glass-panel metric-card">
-                <div>
-                  <div className="metric-label">Completed</div>
-                  <div className="metric-value" style={{ color: '#34d399' }}>
-                    {statusSummary.counts_by_status.COMPLETED || 0}
-                  </div>
-                </div>
-                <CheckCircle2 size={32} color="#34d399" opacity={0.7} />
-              </div>
-
-              <div className="glass-panel metric-card">
-                <div>
-                  <div className="metric-label">Processing (ARQ)</div>
-                  <div className="metric-value" style={{ color: '#fbbf24' }}>
-                    {statusSummary.counts_by_status.PROCESSING || 0}
-                  </div>
-                </div>
-                <Clock size={32} color="#fbbf24" opacity={0.7} className={statusSummary.counts_by_status.PROCESSING > 0 ? 'animate-pulse-glow' : ''} />
-              </div>
-
-              <div className="glass-panel metric-card">
-                <div>
-                  <div className="metric-label">Pending In Queue</div>
-                  <div className="metric-value" style={{ color: '#22d3ee' }}>
-                    {statusSummary.counts_by_status.PENDING || 0}
-                  </div>
-                </div>
-                <Activity size={32} color="#22d3ee" opacity={0.7} />
-              </div>
-
-              <div className="glass-panel metric-card">
-                <div>
-                  <div className="metric-label">Failed</div>
-                  <div className="metric-value" style={{ color: '#f87171' }}>
-                    {statusSummary.counts_by_status.FAILED || 0}
-                  </div>
-                </div>
-                <AlertTriangle size={32} color="#f87171" opacity={0.7} />
-              </div>
-            </div>
-          )}
-
-          {/* Ingestion & Upload Section */}
-          <div className="glass-panel" style={{ padding: '2rem', marginBottom: '2rem' }}>
-            <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.25rem', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-              <UploadCloud size={22} color="var(--primary)" /> Document Ingestion & Classification
-            </h3>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginBottom: '1.5rem' }}>
-              Upload single files or multi-document batches. The asynchronous pipeline executes PaddleOCR (GPU/CPU), 
-              evaluates image quality, performs UIDAI Aadhaar masking, and queries Llama-3.2-3B for banking taxonomy classification.
-            </p>
-
-            <input
-              type="file"
-              ref={fileInputRef}
-              style={{ display: 'none' }}
-              multiple
-              accept=".pdf,.png,.jpg,.jpeg,.webp,.tiff,.tif,.bmp"
-              onChange={(e) => handleFileUpload(e.target.files)}
-            />
-
-            <div
-              className={`upload-dropzone ${dragActive ? 'active' : ''}`}
-              onDragEnter={handleDrag}
-              onDragLeave={handleDrag}
-              onDragOver={handleDrag}
-              onDrop={handleDrop}
-              onClick={() => fileInputRef.current && fileInputRef.current.click()}
-            >
-              <div className="dropzone-icon">
-                <UploadCloud size={30} />
-              </div>
-              <h4 style={{ fontSize: '1.1rem', marginBottom: '0.35rem' }}>
-                Drag and drop files here, or <span style={{ color: 'var(--primary)', textDecoration: 'underline' }}>browse</span>
-              </h4>
-              <p style={{ color: 'var(--text-dim)', fontSize: '0.825rem' }}>
-                Supports PDF, PNG, JPG, WEBP, TIFF up to 100MB each • Batch uploads enabled
+              <h3 style={{ fontSize: '0.95rem', color: 'var(--text-primary)', fontWeight: 600 }}>No documents found</h3>
+              <p style={{ fontSize: '0.8rem', maxWidth: '380px' }}>
+                {completedDocs.length === 0
+                  ? `No documents have been uploaded for reference '${referenceId}' yet. Use the upload zone above to ingest files.`
+                  : 'No documents match your active search or category filters.'}
               </p>
             </div>
+          ) : viewMode === 'table' ? (
+            /* Standard Enterprise Table View */
+            <div className="table-responsive">
+              <table className="enterprise-table">
+                <thead>
+                  <tr>
+                    <th>Document</th>
+                    <th>Classification</th>
+                    <th>Confidence</th>
+                    <th>Quality</th>
+                    <th>Extracted Entities</th>
+                    <th>Ingested</th>
+                    <th>Status</th>
+                    <th style={{ textAlign: 'right' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredDocs.map(doc => {
+                    const filename = getCleanFilename(doc);
+                    const isCompleted = doc.status === 'COMPLETED';
+                    const isProcessing = doc.status === 'PROCESSING' || doc.status === 'PENDING';
+                    const isFailed = doc.status === 'FAILED';
+                    const score = doc.confidence_score || 0;
 
-            {uploadProgress && (
-              <div style={{ marginTop: '1.25rem', padding: '0.75rem 1rem', background: 'rgba(99,102,241,0.12)', border: '1px solid var(--primary)', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <span className="spinner" />
-                <span style={{ fontSize: '0.875rem', color: '#e0e7ff' }}>{uploadProgress}</span>
-              </div>
-            )}
-          </div>
+                    let confClass = 'low';
+                    if (score >= 85) confClass = 'high';
+                    else if (score >= 60) confClass = 'med';
 
-          {/* Processed Documents List */}
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
-              <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                <FileCheck2 size={22} color="var(--accent-cyan)" /> Dossier Documents ({displayDocs.length})
-              </h3>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>
-                Auto-refreshing every 2.5s
-              </span>
-            </div>
+                    const qScore = doc.quality_score ?? 95;
+                    let qDotClass = 'pass';
+                    if (qScore < 60) qDotClass = 'fail';
+                    else if (qScore < 85) qDotClass = 'warning';
 
-            {displayDocs.length === 0 ? (
-              <div className="glass-panel" style={{ padding: '3.5rem', textAlign: 'center', color: 'var(--text-muted)' }}>
-                <FileText size={48} style={{ margin: '0 auto 1rem', opacity: 0.3 }} />
-                <h4 style={{ fontSize: '1.1rem', marginBottom: '0.35rem' }}>No documents uploaded for this reference ID yet</h4>
-                <p style={{ fontSize: '0.85rem', color: 'var(--text-dim)' }}>
-                  Drag & drop Aadhaar cards, PAN cards, GSTR-3B returns, utility bills, or invoices above to begin.
-                </p>
-              </div>
-            ) : (
-              <div className="docs-grid">
-                {displayDocs.map((doc) => {
-                  const isPdf = doc.document_id.includes('.pdf') || (doc.file_path && doc.file_path.toLowerCase().endsWith('.pdf'));
-                  const metadataKeys = Object.keys(doc.extracted_metadata || {});
+                    const entities = doc.extracted_metadata || {};
+                    const entityKeys = Object.keys(entities).filter(k => entities[k] && typeof entities[k] === 'string');
 
-                  return (
-                    <div key={doc.document_id} className="glass-panel doc-card">
-                      <div>
-                        {/* Card Header */}
-                        <div className="doc-card-header">
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                            <div style={{ padding: '0.5rem', background: 'rgba(99, 102, 241, 0.15)', borderRadius: '8px', color: 'var(--primary)' }}>
-                              {isPdf ? <FileText size={22} /> : <ImageIcon size={22} />}
+                    return (
+                      <tr
+                        key={doc.document_id}
+                        className="table-row"
+                        onClick={() => {
+                          setInspectDoc(doc);
+                          setDrawerTab('overview');
+                        }}
+                      >
+                        <td>
+                          <div className="doc-cell">
+                            <div className="doc-file-icon">
+                              <FileText size={16} />
                             </div>
+                            <div className="doc-info">
+                              <span className="doc-name" title={filename}>{filename}</span>
+                              <span className="doc-id-sub">{doc.document_id}</span>
+                            </div>
+                          </div>
+                        </td>
+
+                        <td>
+                          {doc.category ? (
                             <div>
-                              <div className="doc-card-title">
-                                {doc.category || 'Analyzing Document...'}
-                              </div>
-                              <div className="doc-card-id">{doc.document_id}</div>
-                            </div>
-                          </div>
-                          <div>
-                            {getStatusBadge(doc.status)}
-                          </div>
-                        </div>
-
-                        {/* Category & Confidence Ribbon */}
-                        {doc.category && (
-                          <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'rgba(15,23,42,0.6)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
-                              <span className={`badge ${getCategoryColor(doc.category)}`}>
+                              <span className={`category-pill ${doc.category === 'UNKNOWN' ? 'unknown' : ''}`}>
                                 {doc.category}
                               </span>
-                              <span style={{ fontSize: '0.8rem', fontWeight: '700', color: doc.confidence_score > 80 ? '#34d399' : '#fbbf24' }}>
-                                {doc.confidence_score ? `${doc.confidence_score}% Confidence` : 'N/A'}
-                              </span>
+                              {doc.guess && (
+                                <div className="category-subtext">Guess: {doc.guess}</div>
+                              )}
                             </div>
+                          ) : isProcessing ? (
+                            <span className="status-pill processing" style={{ fontSize: '0.72rem' }}>
+                              <RefreshCw size={11} className="spin" style={{ marginRight: '4px' }} />
+                              <span>Analyzing OCR...</span>
+                            </span>
+                          ) : isFailed ? (
+                            <span className="status-pill failed" style={{ fontSize: '0.72rem' }}>
+                              <span>Failed</span>
+                            </span>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Queued...</span>
+                          )}
+                        </td>
 
-                            {/* Progress bar for confidence */}
-                            {doc.confidence_score && (
-                              <div className="progress-bar-container">
+                        <td>
+                          {score > 0 ? (
+                            <div className="confidence-cell">
+                              <div className="confidence-header">
+                                <span>{score}%</span>
+                              </div>
+                              <div className="progress-bar-bg">
                                 <div
-                                  className="progress-bar-fill"
-                                  style={{
-                                    width: `${doc.confidence_score}%`,
-                                    background: doc.confidence_score > 80 ? 'linear-gradient(90deg, #10b981, #06b6d4)' : 'linear-gradient(90deg, #f59e0b, #ef4444)'
-                                  }}
+                                  className={`progress-bar-fill ${confClass}`}
+                                  style={{ width: `${score}%` }}
                                 />
                               </div>
-                            )}
-
-                            {/* UNKNOWN Guess Hypothesis */}
-                            {doc.category === 'UNKNOWN' && doc.guess && (
-                              <div style={{ marginTop: '0.6rem', padding: '0.4rem 0.6rem', background: 'rgba(245, 158, 11, 0.12)', border: '1px dashed rgba(245, 158, 11, 0.4)', borderRadius: '6px', fontSize: '0.8rem' }}>
-                                <strong style={{ color: '#fbbf24' }}>AI Hypothesis / Guess:</strong> {doc.guess}
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Quality & Anti-Tampering Section */}
-                        {doc.quality_score !== null && doc.quality_score !== undefined && (
-                          <div style={{ marginBottom: '0.85rem' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.3rem' }}>
-                              <span>Scan Quality Score:</span>
-                              <span style={{ fontWeight: '700', color: doc.quality_score > 80 ? '#34d399' : '#fbbf24' }}>
-                                {doc.quality_score}/100 {doc.quality_score > 85 ? '(Sharp)' : '(Degraded)'}
-                              </span>
                             </div>
-                            {doc.quality_issues && doc.quality_issues.length > 0 && (
-                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
-                                {doc.quality_issues.map((issue, idx) => (
-                                  <span key={idx} className="badge badge-warning" style={{ fontSize: '0.7rem' }}>
-                                    <AlertTriangle size={10} /> {issue}
-                                  </span>
-                                ))}
-                              </div>
+                          ) : isProcessing ? (
+                            <span style={{ color: '#60a5fa', fontSize: '0.72rem', fontStyle: 'italic' }}>Evaluating...</span>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>—</span>
+                          )}
+                        </td>
+
+                        <td>
+                          {doc.quality_score != null ? (
+                            <div className="quality-pill">
+                              <span className={`quality-dot ${qDotClass}`} />
+                              <span>{qScore}/100</span>
+                            </div>
+                          ) : isProcessing ? (
+                            <span style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>Scanning...</span>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>—</span>
+                          )}
+                        </td>
+
+                        <td>
+                          <div className="entities-wrap">
+                            {entityKeys.length > 0 ? (
+                              entityKeys.slice(0, 2).map(k => (
+                                <span key={k} className="entity-tag">
+                                  <strong>{k.replace('_', ' ')}:</strong> {entities[k]}
+                                </span>
+                              ))
+                            ) : isProcessing ? (
+                              <span style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>Extracting...</span>
+                            ) : (
+                              <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>—</span>
+                            )}
+                            {entityKeys.length > 2 && (
+                              <span className="entity-tag">+{entityKeys.length - 2} more</span>
                             )}
                           </div>
-                        )}
+                        </td>
 
-                        {/* Extracted Key-Value Entities */}
-                        {metadataKeys.length > 0 && (
-                          <div style={{ marginBottom: '1rem' }}>
-                            <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: '0.4rem' }}>
-                              Extracted Financial Entities
-                            </div>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
-                              {Object.entries(doc.extracted_metadata).map(([key, value]) => (
-                                <div key={key} className="meta-chip">
-                                  <span style={{ color: 'var(--accent-cyan)' }}>{key}:</span>
-                                  <span>{String(value)}</span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
+                        <td style={{ color: 'var(--text-secondary)', fontSize: '0.75rem', whiteSpace: 'nowrap' }}>
+                          {doc.created_at ? new Date(doc.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}
+                        </td>
 
-                        {/* Error message on failure */}
-                        {doc.error_message && (
-                          <div className="badge badge-danger" style={{ display: 'block', marginBottom: '0.75rem', wordBreak: 'break-all' }}>
-                            {doc.error_message}
+                        <td>
+                          <span className={`status-pill ${doc.status ? doc.status.toLowerCase() : 'pending'}`}>
+                            {isProcessing && <RefreshCw size={10} className="spin" style={{ marginRight: '3px' }} />}
+                            {doc.status}
+                          </span>
+                        </td>
+
+                        <td>
+                          <div
+                            className="action-btn-group"
+                            style={{ justifyContent: 'flex-end' }}
+                            onClick={e => e.stopPropagation()}
+                          >
+                            <button
+                              className="btn-icon"
+                              onClick={() => triggerDownload(doc.document_id)}
+                              title="Download File"
+                            >
+                              <Download size={14} />
+                            </button>
+                            <button
+                              className="btn-icon"
+                              onClick={() => {
+                                setInspectDoc(doc);
+                                setDrawerTab('overview');
+                              }}
+                              title="Inspect Details"
+                            >
+                              <ChevronRight size={14} />
+                            </button>
                           </div>
-                        )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            /* Alternative Card Grid View */
+            <div className="documents-grid">
+              {filteredDocs.map(doc => {
+                const filename = getCleanFilename(doc);
+                const score = doc.confidence_score || 0;
+                const entities = doc.extracted_metadata || {};
+                const entityKeys = Object.keys(entities).filter(k => entities[k] && typeof entities[k] === 'string');
+
+                return (
+                  <div
+                    key={doc.document_id}
+                    className="doc-card"
+                    onClick={() => {
+                      setInspectDoc(doc);
+                      setDrawerTab('overview');
+                    }}
+                  >
+                    <div className="doc-card-header">
+                      <div className="doc-cell" style={{ minWidth: 'auto' }}>
+                        <div className="doc-file-icon">
+                          <FileText size={16} />
+                        </div>
+                        <div className="doc-info">
+                          <span className="doc-name">{filename}</span>
+                          <span className="doc-id-sub">{doc.document_id}</span>
+                        </div>
                       </div>
+                      <span className={`status-pill ${doc.status ? doc.status.toLowerCase() : 'pending'}`}>
+                        {doc.status}
+                      </span>
+                    </div>
 
-                      {/* Card Footer Actions */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.06)', marginTop: '0.5rem' }}>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>
-                          {new Date(doc.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                    <div>
+                      {doc.category ? (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span className={`category-pill ${doc.category === 'UNKNOWN' ? 'unknown' : ''}`}>
+                            {doc.category}
+                          </span>
+                          <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                            {score}% conf
+                          </span>
+                        </div>
+                      ) : (
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Processing...</span>
+                      )}
+                    </div>
+
+                    <div className="entities-wrap">
+                      {entityKeys.map(k => (
+                        <span key={k} className="entity-tag">
+                          <strong>{k.replace('_', ' ')}:</strong> {entities[k]}
                         </span>
+                      ))}
+                    </div>
 
+                    <div className="doc-card-footer">
+                      <span>Quality: {doc.quality_score ?? 95}/100</span>
+                      <div onClick={e => e.stopPropagation()}>
                         <button
-                          className="btn btn-secondary btn-sm"
-                          onClick={() => handleDownload(doc.document_id)}
-                          title="Secure Download via Stream API"
+                          className="btn btn-secondary"
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.72rem' }}
+                          onClick={() => triggerDownload(doc.document_id)}
                         >
-                          <Download size={13} /> Download File
+                          <Download size={12} />
+                          <span>Download</span>
                         </button>
                       </div>
                     </div>
-                  );
-                })}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      </main>
+
+      {/* 3. Slide-out Document Inspector Drawer */}
+      {inspectDoc && (
+        <div className="drawer-backdrop" onClick={() => setInspectDoc(null)}>
+          <div className="drawer-panel" onClick={e => e.stopPropagation()}>
+            {/* Drawer Header */}
+            <div className="drawer-header">
+              <div className="drawer-title-group">
+                <h3 className="drawer-title">{getCleanFilename(inspectDoc)}</h3>
+                <span className="drawer-subtitle">DOC_ID: {inspectDoc.document_id}</span>
               </div>
-            )}
+              <button
+                className="btn-icon"
+                onClick={() => setInspectDoc(null)}
+                aria-label="Close Inspector"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Drawer Tabs */}
+            <div className="drawer-tabs">
+              <button
+                className={`drawer-tab ${drawerTab === 'overview' ? 'active' : ''}`}
+                onClick={() => setDrawerTab('overview')}
+              >
+                Classification
+              </button>
+              <button
+                className={`drawer-tab ${drawerTab === 'entities' ? 'active' : ''}`}
+                onClick={() => setDrawerTab('entities')}
+              >
+                Extracted Entities
+              </button>
+              <button
+                className={`drawer-tab ${drawerTab === 'quality' ? 'active' : ''}`}
+                onClick={() => setDrawerTab('quality')}
+              >
+                Quality Audit
+              </button>
+              <button
+                className={`drawer-tab ${drawerTab === 'ocr' ? 'active' : ''}`}
+                onClick={() => setDrawerTab('ocr')}
+              >
+                Raw OCR
+              </button>
+            </div>
+
+            {/* Drawer Body */}
+            <div className="drawer-body">
+              {drawerTab === 'overview' && (
+                <>
+                  <div className="drawer-section">
+                    <span className="drawer-section-title">Classification Summary</span>
+                    <div className="details-grid">
+                      <span className="details-key">Category:</span>
+                      <span className="details-val" style={{ color: '#93c5fd', fontWeight: 600 }}>
+                        {inspectDoc.category || 'PENDING'}
+                      </span>
+
+                      <span className="details-key">Confidence:</span>
+                      <span className="details-val">
+                        {inspectDoc.confidence_score ? `${inspectDoc.confidence_score}/100` : '—'}
+                      </span>
+
+                      {inspectDoc.guess && (
+                        <>
+                          <span className="details-key">Hypothesis / Guess:</span>
+                          <span className="details-val" style={{ color: 'var(--warning-text)' }}>
+                            {inspectDoc.guess}
+                          </span>
+                        </>
+                      )}
+
+                      <span className="details-key">Status:</span>
+                      <span className="details-val">{inspectDoc.status}</span>
+
+                      <span className="details-key">Reference Dossier:</span>
+                      <span className="details-val">{inspectDoc.reference_id}</span>
+
+                      <span className="details-key">Storage Path:</span>
+                      <span className="details-val" style={{ fontSize: '0.7rem' }}>{inspectDoc.file_path}</span>
+                    </div>
+                  </div>
+
+                  {inspectDoc.error_message && (
+                    <div className="drawer-section">
+                      <span className="drawer-section-title" style={{ color: 'var(--danger-text)' }}>Pipeline Error</span>
+                      <div style={{
+                        background: 'var(--danger-bg)',
+                        border: '1px solid var(--danger-border)',
+                        color: 'var(--danger-text)',
+                        padding: '0.75rem',
+                        borderRadius: 'var(--radius-sm)',
+                        fontSize: '0.75rem',
+                        fontFamily: 'var(--font-mono)'
+                      }}>
+                        {inspectDoc.error_message}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {drawerTab === 'entities' && (
+                <div className="drawer-section">
+                  <span className="drawer-section-title">Structured Extracted Fields</span>
+                  {inspectDoc.extracted_metadata && Object.keys(inspectDoc.extracted_metadata).length > 0 ? (
+                    <div className="details-grid">
+                      {Object.entries(inspectDoc.extracted_metadata).map(([k, v]) => (
+                        <React.Fragment key={k}>
+                          <span className="details-key">{k.replace(/_/g, ' ').toUpperCase()}:</span>
+                          <span className="details-val">
+                            {typeof v === 'object' ? JSON.stringify(v) : String(v)}
+                          </span>
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  ) : (
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                      No specific structured entities extracted for this category.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {drawerTab === 'quality' && (
+                <div className="drawer-section">
+                  <span className="drawer-section-title">Document Image Quality Diagnostics</span>
+                  <div className="details-grid">
+                    <span className="details-key">Quality Score:</span>
+                    <span className="details-val" style={{ fontWeight: 600, color: (inspectDoc.quality_score ?? 95) >= 80 ? 'var(--success-text)' : 'var(--warning-text)' }}>
+                      {inspectDoc.quality_score ?? 95} / 100
+                    </span>
+
+                    <span className="details-key">Clarity Assessment:</span>
+                    <span className="details-val">
+                      {(inspectDoc.quality_score ?? 95) >= 85 ? 'Acceptable for Legal & Regulatory Submission' : 'Requires Manual Inspection'}
+                    </span>
+                  </div>
+
+                  <span className="drawer-section-title" style={{ marginTop: '0.5rem' }}>Quality Flags Detected</span>
+                  {inspectDoc.quality_issues && inspectDoc.quality_issues.length > 0 ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                      {inspectDoc.quality_issues.map((issue, idx) => (
+                        <div
+                          key={idx}
+                          style={{
+                            background: 'var(--warning-bg)',
+                            border: '1px solid var(--warning-border)',
+                            color: 'var(--warning-text)',
+                            padding: '0.45rem 0.65rem',
+                            borderRadius: 'var(--radius-xs)',
+                            fontSize: '0.75rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.4rem'
+                          }}
+                        >
+                          <AlertCircle size={14} />
+                          <span>{issue}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{
+                      background: 'var(--success-bg)',
+                      border: '1px solid var(--success-border)',
+                      color: 'var(--success-text)',
+                      padding: '0.55rem 0.75rem',
+                      borderRadius: 'var(--radius-xs)',
+                      fontSize: '0.75rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem'
+                    }}>
+                      <CheckCircle2 size={14} />
+                      <span>Zero quality defects detected. Resolution and contrast within optimal thresholds.</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {drawerTab === 'ocr' && (
+                <div className="drawer-section">
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span className="drawer-section-title">OCR Text Stream</span>
+                    <button
+                      className="btn btn-secondary"
+                      style={{ padding: '0.2rem 0.5rem', fontSize: '0.72rem' }}
+                      onClick={() => copyToClipboard(inspectDoc.raw_text || '', 'ocr')}
+                    >
+                      {copiedKey === 'ocr' ? <Check size={12} /> : <Copy size={12} />}
+                      <span>{copiedKey === 'ocr' ? 'Copied' : 'Copy Text'}</span>
+                    </button>
+                  </div>
+                  <pre className="ocr-text-box">
+                    {inspectDoc.raw_text || '[No OCR text available or processing in progress]'}
+                  </pre>
+                </div>
+              )}
+            </div>
+
+            {/* Drawer Footer */}
+            <div className="drawer-footer">
+              <button
+                className="btn btn-primary"
+                onClick={() => triggerDownload(inspectDoc.document_id)}
+              >
+                <Download size={14} />
+                <span>Download Original Document</span>
+              </button>
+              <button
+                className="btn btn-secondary"
+                onClick={() => setInspectDoc(null)}
+              >
+                Close
+              </button>
+            </div>
           </div>
-        </main>
+        </div>
       )}
     </div>
   );

@@ -227,10 +227,7 @@ async def get_completed_documents(
     """
     stmt = (
         select(Document)
-        .where(
-            Document.reference_id == reference_id,
-            Document.status == DocumentStatus.COMPLETED,
-        )
+        .where(Document.reference_id == reference_id)
         .order_by(Document.created_at.desc())
     )
     result = await db.execute(stmt)
@@ -240,10 +237,13 @@ async def get_completed_documents(
     response_items = []
     for doc in documents:
         download_url = f"{base_url}/documents/download/{doc.document_id}"
+        fname = os.path.basename(doc.file_path).replace(f"{doc.document_id}_", "") if doc.file_path else "document"
         response_items.append(
             CompletedDocumentItem(
                 document_id=doc.document_id,
                 reference_id=doc.reference_id,
+                file_name=fname,
+                status=doc.status,
                 category=doc.category,
                 confidence_score=doc.confidence_score,
                 guess=doc.guess,
@@ -251,6 +251,7 @@ async def get_completed_documents(
                 quality_score=doc.quality_score,
                 quality_issues=doc.quality_issues,
                 document_url=download_url,
+                raw_text=doc.raw_text,
                 created_at=doc.created_at,
                 updated_at=doc.updated_at,
             )
@@ -301,6 +302,7 @@ async def get_reference_documents_status(
     doc_items = [
         DocumentStatusSummaryItem(
             document_id=d.document_id,
+            file_name=os.path.basename(d.file_path).replace(f"{d.document_id}_", "") if d.file_path else "document",
             status=d.status,
             category=d.category,
             confidence_score=d.confidence_score,
@@ -309,6 +311,7 @@ async def get_reference_documents_status(
             quality_score=d.quality_score,
             quality_issues=d.quality_issues,
             error_message=d.error_message,
+            raw_text=d.raw_text,
             created_at=d.created_at,
             updated_at=d.updated_at,
         )
