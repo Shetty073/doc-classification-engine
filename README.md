@@ -8,6 +8,20 @@ The platform automates the ingestion, text extraction, image quality auditing, a
 
 ---
 
+## 🎬 Video Demo & System Walkthrough
+
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=xAgoO07qafQ" target="_blank">
+    <img src="https://img.youtube.com/vi/xAgoO07qafQ/maxresdefault.jpg" alt="Indian Financial Document Classification Engine Demo" width="100%" style="max-width: 850px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.25);" />
+  </a>
+</p>
+
+<p align="center">
+  ▶️ <strong><a href="https://www.youtube.com/watch?v=xAgoO07qafQ" target="_blank">Watch the Full Demo Walkthrough on YouTube</a></strong> — Ingestion, asynchronous processing pipeline, OCR extraction, image quality diagnostics, and the React banking dashboard.
+</p>
+
+---
+
 ## 🏗️ System Architecture
 
 ```
@@ -90,6 +104,8 @@ The engine includes a modern, high-density **Enterprise Banking Dashboard** desi
 * **Document Inspector Drawer:** Slide-out right-side panel providing tabs for Classification Summary, Structured Extracted Entities (PAN, GSTIN, CIN, dates), Document Image Quality Diagnostics, and Raw Monospace OCR Text with one-click copy.
 * **Dual View Modes:** Seamless toggle between an Enterprise Data Table view and a Grid Card view.
 * **Ingestion Gateway:** Drag-and-drop dropzone supporting single-file and multi-file batch uploads (PDF, PNG, JPG, TIFF) with optional Webhook Callback URL configuration.
+
+> 📺 **Live Demo:** Watch the service in action in the [Video Demo Walkthrough](https://www.youtube.com/watch?v=xAgoO07qafQ).
 
 ```bash
 # To run the frontend locally:
