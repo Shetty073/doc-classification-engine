@@ -125,7 +125,7 @@ npm run dev
 * **OCR & Extraction Engine:** 
   * `paddlepaddle-gpu` (CUDA-accelerated on NVIDIA RTX GPUs) with automated runtime fallback to CPU.
   * `paddleocr` (v2.10) with textline orientation detection.
-  * `PyMuPDF` (`pymupdf`) digital text extraction + page rasterization (150 DPI).
+  * `PyMuPDF` (`pymupdf`) digital text extraction + page rasterization (100 DPI / 1024px dynamic bounding).
 * **AI Model Inference (Dual-Engine LLM / VLM):** 
   * **LLM Mode (`CLASSIFIER_MODE=llm`):** `Llama-3.2-3B-Instruct` served locally via [`llama.cpp`](https://github.com/ggerganov/llama.cpp)'s OpenAI-compatible HTTP server (`http://localhost:8080/v1/chat/completions`).
   * **VLM Mode (`CLASSIFIER_MODE=vlm`):** Multimodal Vision-Language Models (e.g. `Qwen2-VL-7B-Instruct`, `Llama-3.2-11B-Vision`) receiving base64 rendered document pages and OCR hints directly via OpenAI-compatible vision completions.
@@ -248,10 +248,28 @@ VLM_MAX_IMAGE_PAGES=3
 ```
 
 ### 2. How VLM Inference Operates:
-* **PDFs & Images Rendered to Visual Embeddings:** When a document is processed, `PyMuPDF` renders the key pages (150 DPI) into base64 images without writing temporary files to disk.
-* **OpenAI Vision Specification:** Requests are dispatched to `VLM_URL` using standard `image_url` data URIs along with OCR hints and the comprehensive 42-class RBI banking prompt.
-* **High-Availability Fallback:** If the VLM server is offline or busy, the pipeline falls back gracefully to OCR text heuristics to ensure banking operational continuity.
+* **Hybrid Multimodal Ingestion (Vision + OCR):** The prompt includes both the rendered page image(s) and native PaddleOCR plain text hints, allowing the vision model to verify document stamps, government emblems, and layout geometry without sacrificing textual precision.
+* **Bounded Image Resolution & Token Sizing:** `PyMuPDF` renders pages at `100 DPI` with Lanczos downscaling capped at `max_dim=1024` pixels. This ensures high visual clarity while keeping visual tokens per page between 750–950 tokens (comfortably below inference batch buffers).
+* **OpenAI Vision Specification:** Requests are dispatched to `VLM_URL` using standard `image_url` base64 data URIs along with the comprehensive 42-class RBI banking prompt.
+* **High-Availability Fallback:** If the VLM server is offline, times out, or encounters a server error, the pipeline automatically falls back to regex-backed banking heuristics so document processing never halts.
 * **UI Transparency:** The active engine mode is prominently displayed on the Enterprise Dashboard header badge (`MODEL: VLM (Vision)` or `MODEL: LLM (Text)`).
+
+### 3. Recommended `llama-server` Startup Command for Qwen2-VL:
+When serving multimodal models like `Qwen2-VL-7B-Instruct` locally via `llama.cpp`'s `llama-server`, run with expanded batch size (`-b 4096`) and context (`-c 16384`) to accommodate visual token chunks:
+
+```cmd
+:: On Windows:
+llama-server.exe ^
+  -m "models\Qwen2-VL-7B-Instruct-Q4_K_M.gguf" ^
+  --mmproj "models\mmproj-Qwen2-VL-7B-Instruct-f16.gguf" ^
+  -c 16384 ^
+  -b 4096 ^
+  -ub 2048 ^
+  -np 2 ^
+  --port 8080
+```
+
+> 💡 **Batch Size Tip:** Setting `-b 4096` provides ample headroom for multi-image prompts and prevents the common `failed to find a memory slot for batch of size 2048` error.
 
 ---
 

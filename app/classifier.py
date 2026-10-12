@@ -27,26 +27,35 @@ def prepare_document_images(file_path: str, max_pages: int = 3) -> List[str]:
     try:
         if ext == ".pdf":
             import pymupdf
+            from PIL import Image
+
             doc = pymupdf.open(file_path)
             num_pages = min(len(doc), max_pages)
             for page_idx in range(num_pages):
                 page = doc.load_page(page_idx)
-                # 150 DPI provides sharp fidelity for vision models while keeping memory bounded
-                pix = page.get_pixmap(dpi=150)
-                img_bytes = pix.tobytes("jpeg")
-                b64_str = base64.b64encode(img_bytes).decode("utf-8")
-                base64_images.append(b64_str)
-        else:
-            from PIL import Image
-            with Image.open(file_path) as img:
-                if img.mode not in ("RGB", "L"):
-                    img = img.convert("RGB")
-                max_dim = 1600
+                # 100 DPI keeps token count bounded while maintaining text legibility
+                pix = page.get_pixmap(dpi=100)
+                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                max_dim = 1024
                 if max(img.size) > max_dim:
                     img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
 
                 buffer = io.BytesIO()
-                img.save(buffer, format="JPEG", quality=85)
+                img.save(buffer, format="JPEG", quality=80)
+                b64_str = base64.b64encode(buffer.getvalue()).decode("utf-8")
+                base64_images.append(b64_str)
+        else:
+            from PIL import Image
+
+            with Image.open(file_path) as img:
+                if img.mode not in ("RGB", "L"):
+                    img = img.convert("RGB")
+                max_dim = 1024
+                if max(img.size) > max_dim:
+                    img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+
+                buffer = io.BytesIO()
+                img.save(buffer, format="JPEG", quality=80)
                 b64_str = base64.b64encode(buffer.getvalue()).decode("utf-8")
                 base64_images.append(b64_str)
     except Exception as exc:

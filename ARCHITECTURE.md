@@ -48,15 +48,15 @@ flowchart TB
         subgraph OCRSubsystem ["OCR Extraction Subsystem"]
             FormatDetector{"Is PDF or Image?"}
             PyMuPDFText["PyMuPDF Digital Text Extractor<br/>(Pages 1..5)"]
-            PyMuPDFRaster["PyMuPDF Rasterizer<br/>(150 DPI Render)"]
+            PyMuPDFRaster["PyMuPDF Rasterizer<br/>(100 DPI / 1024px Dynamic Bound)"]
             PaddleOCR["PaddleOCR Engine (app/ocr.py)<br/>(GPU: CUDA / CPU Fallback)"]
-            UIDAIMasker["Aadhaar Privacy Masker (app/utils/masking.py)<br/>(Redacts 8 digits of UIDAI numbers)"]
+            UIDAIMasker["Aadhaar Privacy Masker (app/utils/redactor.py)<br/>(Redacts 8 digits of UIDAI numbers)"]
         end
 
         subgraph ClassifierSubsystem ["Dual AI Inference Engine (LLM / VLM)"]
             ModeBranch{"CLASSIFIER_MODE?<br/>(from .env)"}
             LLMInference["LLM Pipeline (Text-Based)<br/>Llama-3.2-3B via llama.cpp<br/>POST /v1/chat/completions"]
-            VLMInference["VLM Pipeline (Multimodal Vision)<br/>Qwen2-VL via OpenAI Vision API<br/>Base64 Page Images + OCR Hint"]
+            VLMInference["VLM Pipeline (Multimodal Vision)<br/>Qwen2-VL via OpenAI Vision API<br/>Base64 Images (1024px) + OCR Hint"]
             PromptBuilder["Prompt Constructor<br/>(42-Class RBI Banking Taxonomy + JSON Schema)"]
             PostReconciliation["Rule Reconciliation & Fallback Engine<br/>- MCA Incorporation vs PAN<br/>- Udyam vs Board Resolution<br/>- MOA/AOA vs Business Registration"]
             EntityExtractor["Entity Extractor (app/utils/entity_extractor.py)<br/>- PAN, GSTIN, CIN, Dates, Names"]
@@ -90,10 +90,12 @@ flowchart TB
 
     PyMuPDFText --> UIDAIMasker
     PaddleOCR --> UIDAIMasker
-    UIDAIMasker --> PromptBuilder
+    UIDAIMasker --> ModeBranch
 
-    PromptBuilder --> HTTPXClient --> LlamaServer
-    LlamaServer --> HTTPXClient --> PostReconciliation
+    ModeBranch -->|"llm (Text)"| LLMInference --> PromptBuilder
+    ModeBranch -->|"vlm (Vision)"| VLMInference --> PromptBuilder
+
+    PromptBuilder --> PostReconciliation
     PostReconciliation --> EntityExtractor
     EntityExtractor --> StateUpdater2 --> PostgresDB
     StateUpdater2 --> WebhookDispatcher
@@ -148,14 +150,24 @@ sequenceDiagram
     alt PDF with Digital Text
         OCR->>OCR: Extract digital text via PyMuPDF (pages 1..5)
     else Scanned PDF / Image
-        OCR->>OCR: Rasterize page (150 DPI) & run PaddleOCR (GPU/CPU)
+        OCR->>OCR: Rasterize page (100 DPI / 1024px) & run PaddleOCR (GPU/CPU)
     end
     OCR-->>Worker: Plain text (anchors, tables, numbers)
-    Worker->>Worker: Mask Aadhaar digits (UIDAI privacy rule)
+    Worker->>Worker: Mask Aadhaar digits (UIDAI privacy rule via app/utils/redactor.py)
 
-    %% LLM Classification
-    Worker->>LLM: POST /v1/chat/completions (Prompt + OCR text + JSON schema)
-    LLM-->>Worker: JSON {"category": "BUSINESS_REGISTRATION", "confidence_score": 100, ...}
+    %% Dual Classifier Branching (LLM vs VLM)
+    alt CLASSIFIER_MODE = "llm" (Text-Based Inference)
+        Worker->>LLM: POST /v1/chat/completions (System prompt + OCR text + JSON schema)
+        LLM-->>Worker: JSON {"category": "BUSINESS_REGISTRATION", "confidence_score": 100, ...}
+    else CLASSIFIER_MODE = "vlm" (Multimodal Vision Inference)
+        Worker->>Worker: Render document pages to base64 images (100 DPI, max 1024px)
+        Worker->>LLM: POST /v1/chat/completions (OpenAI Vision: image_url + OCR hints + JSON schema)
+        alt VLM Server Available
+            LLM-->>Worker: JSON {"category": "BUSINESS_REGISTRATION", "confidence_score": 100, ...}
+        else VLM Offline / 500 Server Error
+            Worker->>Worker: Trigger graceful banking heuristics fallback
+        end
+    end
     Worker->>Worker: Rule reconciliation (prioritizes Incorporation above secondary PAN mentions)
     Worker->>Worker: Deterministic entity extraction (PAN, GSTIN, CIN, Dates)
 
@@ -245,3 +257,4 @@ stateDiagram-v2
 | **Zip Slip Traversal Attack** | Strict canonical target path verification against destination root (`os.path.commonpath`). | [app/utils/archive.py](file:///f:/doc-classification-engine/app/utils/archive.py) |
 | **Zip Bomb Decompression** | Pre-extraction size inspection capping uncompressed bytes at `MAX_ARCHIVE_UNCOMPRESSED_BYTES` (200MB). | [app/utils/archive.py](file:///f:/doc-classification-engine/app/utils/archive.py) |
 | **PII / UIDAI Compliance** | Automated masking of Aadhaar digits (first 8 digits masked) before raw OCR text is persisted. | [app/utils/redactor.py](file:///f:/doc-classification-engine/app/utils/redactor.py) |
+| **Visual Token Explosion / Batch OOM** | Dynamic resolution clamping (`100 DPI`, `max_dim=1024px`) bounding visual tokens below 1,000 per page to prevent memory slot exhaustion in inference servers. | [app/classifier.py](file:///f:/doc-classification-engine/app/classifier.py) |
