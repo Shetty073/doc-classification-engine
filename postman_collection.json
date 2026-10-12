@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "8b52f360-14e3-4f11-9a72-IndianBankDocClassification",
     "name": "Indian Financial Document Classification Engine",
-    "description": "Enterprise API Collection for RBI KYC OVDs and Business Lending Document Classification Engine using FastAPI, ARQ/Redis, PaddleOCR, and Llama-3.2-3B-Instruct.",
+    "description": "Enterprise API Collection for RBI KYC OVDs and Business Lending Document Classification Engine supporting dual LLM / VLM Inference (Llama-3.2 / Qwen2-VL) and ZIP dossier archive ingestion using FastAPI, ARQ/Redis, and PaddleOCR.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -170,7 +170,7 @@
                 },
                 {
                   "key": "file",
-                  "description": "Select PDF or Image file (Aadhaar, PAN, GST Return, PO, Invoice, Balance Sheet, Certificate of Incorporation)",
+                  "description": "Select PDF or Image file (Aadhaar, PAN, GST Return, PO, Invoice, Balance Sheet, Certificate of Incorporation) or ZIP archive",
                   "type": "file",
                   "src": ""
                 },
@@ -188,7 +188,68 @@
               "host": ["{{baseUrl}}"],
               "path": ["upload"]
             },
-            "description": "Uploads PDF or image document (PDF, PNG, JPG, WEBP, TIFF), stores file in ./uploads, creates PENDING database record and enqueues background OCR + LLM classification job to ARQ/Redis."
+            "description": "Uploads PDF, image, or ZIP archive document (PDF, PNG, JPG, WEBP, TIFF, ZIP). Unpacks ZIP contents safely and enqueues background processing job(s) for LLM or VLM classification based on CLASSIFIER_MODE."
+          }
+        },
+        {
+          "name": "Upload ZIP Archive Dossier (/upload)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "pm.test('Status code is 202 Accepted', function () {",
+                  "    pm.response.to.have.status(202);",
+                  "});",
+                  "pm.test('Is archive flag is true', function () {",
+                  "    pm.expect(jsonData.is_archive).to.be.true;",
+                  "});",
+                  "pm.test('Total enqueued >= 1', function () {",
+                  "    pm.expect(jsonData.total_enqueued).to.be.above(0);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "reference_id",
+                  "value": "{{referenceId}}",
+                  "type": "text"
+                },
+                {
+                  "key": "file",
+                  "description": "Select ZIP archive (.zip) containing KYC/lending documents (PDFs, images)",
+                  "type": "file",
+                  "src": ""
+                },
+                {
+                  "key": "callback_url",
+                  "value": "https://webhook.site/test-callback",
+                  "type": "text",
+                  "disabled": true,
+                  "description": "Optional webhook notification URL triggered on completion"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/upload",
+              "host": ["{{baseUrl}}"],
+              "path": ["upload"]
+            },
+            "description": "Uploads a borrower KYC dossier as a .zip file. The engine unpacks all valid document files (with Zip Slip and Zip Bomb guards) and enqueues individual asynchronous classification jobs."
           }
         },
         {
@@ -228,7 +289,7 @@
                 },
                 {
                   "key": "files",
-                  "description": "Select multiple files for batch processing",
+                  "description": "Select multiple files (PDFs, Images, and ZIP archives) for batch processing",
                   "type": "file",
                   "src": []
                 },
@@ -246,7 +307,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["upload-batch"]
             },
-            "description": "Uploads multiple KYC or financial documents under a single reference ID, creating atomic PENDING records and concurrent background processing jobs."
+            "description": "Uploads multiple KYC or financial documents (including ZIP archives) under a single reference ID, creating atomic PENDING records and concurrent background processing jobs."
           }
         },
         {

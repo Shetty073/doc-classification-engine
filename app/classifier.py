@@ -1,13 +1,59 @@
+import base64
+import io
 import json
 import logging
+import os
 import re
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import httpx
 from app.config import settings
 from app.schemas import ClassificationResult
 from app.utils.entity_extractor import extract_key_entities
 
 logger = logging.getLogger("classifier_service")
+
+
+def prepare_document_images(file_path: str, max_pages: int = 3) -> List[str]:
+    """
+    Renders document pages (for PDF) or prepares images (for PNG/JPG)
+    as base64-encoded JPEG strings for Vision Language Model (VLM) ingestion.
+    """
+    if not os.path.exists(file_path):
+        return []
+
+    ext = os.path.splitext(file_path)[1].lower()
+    base64_images: List[str] = []
+
+    try:
+        if ext == ".pdf":
+            import pymupdf
+            doc = pymupdf.open(file_path)
+            num_pages = min(len(doc), max_pages)
+            for page_idx in range(num_pages):
+                page = doc.load_page(page_idx)
+                # 150 DPI provides sharp fidelity for vision models while keeping memory bounded
+                pix = page.get_pixmap(dpi=150)
+                img_bytes = pix.tobytes("jpeg")
+                b64_str = base64.b64encode(img_bytes).decode("utf-8")
+                base64_images.append(b64_str)
+        else:
+            from PIL import Image
+            with Image.open(file_path) as img:
+                if img.mode not in ("RGB", "L"):
+                    img = img.convert("RGB")
+                max_dim = 1600
+                if max(img.size) > max_dim:
+                    img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+
+                buffer = io.BytesIO()
+                img.save(buffer, format="JPEG", quality=85)
+                b64_str = base64.b64encode(buffer.getvalue()).decode("utf-8")
+                base64_images.append(b64_str)
+    except Exception as exc:
+        logger.error("Failed to prepare images from %s for VLM: %s", file_path, exc)
+
+    return base64_images
+
 
 # Comprehensive Taxonomy of Indian Financial & Banking Documents (RBI & PMLA Compliant)
 ALLOWED_CATEGORIES = [
@@ -219,6 +265,99 @@ class LLMClassifierService:
             fallback = self._heuristic_fallback(ocr_text, error=str(exc))
             fallback.extracted_metadata = extract_key_entities(fallback.category, ocr_text)
             return fallback
+
+    def build_vlm_messages(self, images_base64: List[str], ocr_text: str = "") -> list[Dict[str, Any]]:
+        """Constructs an OpenAI-compatible multimodal chat completion message payload for VLM."""
+        user_content: List[Dict[str, Any]] = [
+            {
+                "type": "text",
+                "text": (
+                    "You are a Principal Document Intelligence Classifier for an Indian Bank / NBFC.\n"
+                    "Analyze the attached document visual image(s) and classify it into EXACTLY ONE category from the banking taxonomy.\n"
+                    "If it does not fit the banking taxonomy, categorize as UNKNOWN, assign a confidence_score between 1 and 100, and provide your best guess.\n"
+                    + (f"\n--- EXTRACTED OCR TEXT HINT ---\n{ocr_text[:2000]}\n--- END OCR TEXT ---\n" if ocr_text else "")
+                ),
+            }
+        ]
+
+        for img_b64 in images_base64:
+            user_content.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{img_b64}"
+                }
+            })
+
+        return [
+            {"role": "system", "content": SYSTEM_PROMPT.strip()},
+            {"role": "user", "content": user_content},
+        ]
+
+    async def classify_vlm(self, file_path: str, ocr_text: str = "") -> ClassificationResult:
+        """
+        Executes Vision-Language Model (VLM) document classification by sending rendered page
+        image(s) and OCR hints to the OpenAI-compatible VLM server endpoint.
+        """
+        images = prepare_document_images(file_path, max_pages=settings.VLM_MAX_IMAGE_PAGES)
+        if not images:
+            logger.warning("No images could be prepared for VLM from %s. Falling back to text LLM.", file_path)
+            return await self.classify_text(ocr_text)
+
+        messages = self.build_vlm_messages(images, ocr_text)
+        payload: Dict[str, Any] = {
+            "model": settings.VLM_MODEL_NAME,
+            "messages": messages,
+            "temperature": 0.05,
+            "max_tokens": 256,
+            "response_format": {"type": "json_object"},
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=settings.VLM_REQUEST_TIMEOUT_SECONDS) as client:
+                logger.info(
+                    "Sending multimodal classification request to VLM at %s (model: %s, %d image(s))",
+                    settings.VLM_URL,
+                    settings.VLM_MODEL_NAME,
+                    len(images),
+                )
+                response = await client.post(settings.VLM_URL, json=payload)
+                response.raise_for_status()
+                response_data = response.json()
+
+            raw_content = response_data["choices"][0]["message"]["content"]
+            parsed_result = self._parse_llm_json(raw_content, ocr_text)
+
+            # Enrich with deterministic entity extraction
+            parsed_result.extracted_metadata = extract_key_entities(
+                category=parsed_result.category,
+                text=ocr_text,
+                llm_metadata=parsed_result.extracted_metadata,
+            )
+            return parsed_result
+
+        except httpx.RequestError as exc:
+            logger.error("Network or connection error communicating with VLM (%s): %s", settings.VLM_URL, exc)
+            fallback = self._heuristic_fallback(ocr_text, error=f"VLM server unreachable: {exc}")
+            fallback.extracted_metadata = extract_key_entities(fallback.category, ocr_text)
+            return fallback
+        except Exception as exc:
+            logger.error("Error during VLM document classification: %s", exc, exc_info=True)
+            fallback = self._heuristic_fallback(ocr_text, error=str(exc))
+            fallback.extracted_metadata = extract_key_entities(fallback.category, ocr_text)
+            return fallback
+
+    async def classify(self, file_path: str, ocr_text: str = "") -> ClassificationResult:
+        """
+        Unified classification entry point: dynamically routes to VLM or LLM
+        based on the CLASSIFIER_MODE environment variable setting.
+        """
+        mode = getattr(settings, "CLASSIFIER_MODE", "llm").strip().lower()
+        if mode == "vlm":
+            logger.info("CLASSIFIER_MODE is 'vlm'. Invoking multimodal Vision Language Model for %s...", file_path)
+            return await self.classify_vlm(file_path=file_path, ocr_text=ocr_text)
+        else:
+            logger.info("CLASSIFIER_MODE is '%s'. Invoking text-based LLM classifier...", mode)
+            return await self.classify_text(ocr_text=ocr_text)
 
     def _parse_llm_json(self, raw_content: str, source_text: str = "") -> ClassificationResult:
         """Sanitizes and parses JSON returned by llama.cpp, applying banking reconciliation."""

@@ -84,9 +84,9 @@ async def process_document(ctx: dict, document_id: str, file_path: str):
             # Step 4: Regulatory Aadhaar Masking (UIDAI / RBI Section 16 compliance)
             masked_text = mask_aadhaar_numbers(raw_extracted_text)
 
-            # Step 5: Classify text and extract key financial entities
-            logger.info("Classifying document %s via banking taxonomy...", document_id)
-            classification = await classifier_service.classify_text(masked_text)
+            # Step 5: Classify document via banking taxonomy (LLM or VLM based on CLASSIFIER_MODE)
+            logger.info("Classifying document %s via banking taxonomy (mode: %s)...", document_id, settings.CLASSIFIER_MODE)
+            classification = await classifier_service.classify(file_path=file_path, ocr_text=masked_text)
 
             logger.info(
                 "Document %s classified as '%s' (Score: %d/100, Reasoning: %s)",

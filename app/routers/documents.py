@@ -29,6 +29,8 @@ from app.schemas import (
 )
 from app.security import get_current_user
 
+from app.utils.archive import extract_zip_archive
+
 router = APIRouter(tags=["Documents"])
 
 
@@ -97,28 +99,80 @@ async def _save_upload_file(file: UploadFile, unique_doc_id: str) -> str:
     "/upload",
     response_model=DocumentUploadResponse,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Upload financial document for asynchronous OCR and classification",
+    summary="Upload financial document or ZIP archive for asynchronous OCR and classification",
 )
 @limiter.limit(settings.RATE_LIMIT_UPLOAD)
 async def upload_document(
     request: Request,
-    file: UploadFile = File(..., description="Document file (PDF or Image)"),
+    file: UploadFile = File(..., description="Document file (PDF, Image, or ZIP archive)"),
     reference_id: str = Form(..., min_length=1, max_length=64, description="Lending/KYC application reference ID"),
     callback_url: Optional[str] = Form(None, description="Optional webhook URL for completion notification"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Accepts a KYC or financial document, stores it securely, creates a PENDING
-    record in PostgreSQL, and enqueues an asynchronous processing job to ARQ/Redis.
+    Accepts a KYC or financial document (or ZIP dossier archive), stores files securely,
+    creates PENDING record(s) in PostgreSQL, and enqueues asynchronous processing job(s) to ARQ/Redis.
     """
-    unique_doc_id = f"doc_{uuid.uuid4().hex}"
-    file_path = await _save_upload_file(file, unique_doc_id)
+    unique_upload_id = f"upload_{uuid.uuid4().hex}"
+    temp_stored_path = await _save_upload_file(file, unique_upload_id)
+    file_ext = os.path.splitext(file.filename or "")[1].lower()
+    arq_pool = getattr(request.app.state, "arq_redis", None)
 
+    # 1. Handle ZIP archive ingestion
+    if file_ext in settings.ARCHIVE_EXTENSIONS:
+        try:
+            extracted_docs = extract_zip_archive(temp_stored_path, settings.UPLOAD_DIR)
+        finally:
+            if os.path.exists(temp_stored_path):
+                os.remove(temp_stored_path)
+
+        enqueued_docs = []
+        for edoc in extracted_docs:
+            new_doc = Document(
+                document_id=edoc.document_id,
+                reference_id=reference_id,
+                file_path=edoc.file_path,
+                callback_url=callback_url,
+                status=DocumentStatus.PENDING,
+                category=None,
+            )
+            db.add(new_doc)
+            enqueued_docs.append(new_doc)
+
+        await db.commit()
+
+        batch_items = []
+        for edoc, doc in zip(extracted_docs, enqueued_docs):
+            if arq_pool:
+                await arq_pool.enqueue_job(
+                    "process_document",
+                    document_id=doc.document_id,
+                    file_path=doc.file_path,
+                )
+            batch_items.append(
+                BatchUploadItem(
+                    document_id=doc.document_id,
+                    filename=edoc.original_filename,
+                    status=DocumentStatus.PENDING,
+                )
+            )
+
+        return DocumentUploadResponse(
+            document_id=enqueued_docs[0].document_id,
+            reference_id=reference_id,
+            status=DocumentStatus.PENDING,
+            callback_url=callback_url,
+            is_archive=True,
+            total_enqueued=len(enqueued_docs),
+            documents=batch_items,
+        )
+
+    # 2. Handle single standard document (PDF / Image)
     new_doc = Document(
-        document_id=unique_doc_id,
+        document_id=unique_upload_id.replace("upload_", "doc_"),
         reference_id=reference_id,
-        file_path=file_path,
+        file_path=temp_stored_path,
         callback_url=callback_url,
         status=DocumentStatus.PENDING,
         category=None,
@@ -127,12 +181,11 @@ async def upload_document(
     await db.commit()
     await db.refresh(new_doc)
 
-    arq_pool = getattr(request.app.state, "arq_redis", None)
     if arq_pool:
         await arq_pool.enqueue_job(
             "process_document",
-            document_id=unique_doc_id,
-            file_path=file_path,
+            document_id=new_doc.document_id,
+            file_path=temp_stored_path,
         )
 
     return DocumentUploadResponse(
@@ -140,6 +193,15 @@ async def upload_document(
         reference_id=new_doc.reference_id,
         status=new_doc.status,
         callback_url=new_doc.callback_url,
+        is_archive=False,
+        total_enqueued=1,
+        documents=[
+            BatchUploadItem(
+                document_id=new_doc.document_id,
+                filename=file.filename or "document",
+                status=DocumentStatus.PENDING,
+            )
+        ],
     )
 
 
@@ -147,20 +209,20 @@ async def upload_document(
     "/upload-batch",
     response_model=BatchUploadResponse,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Upload multiple financial documents in a single batch",
+    summary="Upload multiple financial documents or ZIP archives in a single batch",
 )
 @limiter.limit(settings.RATE_LIMIT_UPLOAD)
 async def upload_batch(
     request: Request,
-    files: List[UploadFile] = File(..., description="List of document files (PDF or Images)"),
+    files: List[UploadFile] = File(..., description="List of document files (PDFs, Images, or ZIP archives)"),
     reference_id: str = Form(..., min_length=1, max_length=64, description="Lending/KYC application reference ID"),
     callback_url: Optional[str] = Form(None, description="Optional webhook URL for notifications"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Accepts a batch of KYC and lending documents under a single reference ID,
-    streams them to storage, creates PENDING records, and dispatches parallel ARQ jobs.
+    Accepts a batch of KYC and lending documents (including nested ZIP archives) under a single reference ID,
+    streams them to storage, extracts ZIP contents, creates PENDING records, and dispatches parallel ARQ jobs.
     """
     if not files or len(files) == 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No files provided in batch upload.")
@@ -172,19 +234,40 @@ async def upload_batch(
     arq_pool = getattr(request.app.state, "arq_redis", None)
 
     for upload_file in files:
-        unique_doc_id = f"doc_{uuid.uuid4().hex}"
-        file_path = await _save_upload_file(upload_file, unique_doc_id)
+        file_ext = os.path.splitext(upload_file.filename or "")[1].lower()
+        unique_upload_id = f"upload_{uuid.uuid4().hex}"
+        stored_path = await _save_upload_file(upload_file, unique_upload_id)
 
-        new_doc = Document(
-            document_id=unique_doc_id,
-            reference_id=reference_id,
-            file_path=file_path,
-            callback_url=callback_url,
-            status=DocumentStatus.PENDING,
-            category=None,
-        )
-        db.add(new_doc)
-        enqueued_items.append((new_doc, upload_file.filename or "unnamed", file_path))
+        if file_ext in settings.ARCHIVE_EXTENSIONS:
+            try:
+                extracted_docs = extract_zip_archive(stored_path, settings.UPLOAD_DIR)
+            finally:
+                if os.path.exists(stored_path):
+                    os.remove(stored_path)
+
+            for edoc in extracted_docs:
+                new_doc = Document(
+                    document_id=edoc.document_id,
+                    reference_id=reference_id,
+                    file_path=edoc.file_path,
+                    callback_url=callback_url,
+                    status=DocumentStatus.PENDING,
+                    category=None,
+                )
+                db.add(new_doc)
+                enqueued_items.append((new_doc, edoc.original_filename, edoc.file_path))
+        else:
+            doc_id = unique_upload_id.replace("upload_", "doc_")
+            new_doc = Document(
+                document_id=doc_id,
+                reference_id=reference_id,
+                file_path=stored_path,
+                callback_url=callback_url,
+                status=DocumentStatus.PENDING,
+                category=None,
+            )
+            db.add(new_doc)
+            enqueued_items.append((new_doc, upload_file.filename or "unnamed", stored_path))
 
     await db.commit()
 

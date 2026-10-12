@@ -37,19 +37,22 @@ class UserResponse(UserBase):
 # ---------------------------------------------------------
 # Document Schemas
 # ---------------------------------------------------------
+class BatchUploadItem(BaseModel):
+    document_id: str
+    filename: str
+    status: DocumentStatus
+
+
 class DocumentUploadResponse(BaseModel):
     document_id: str
     reference_id: str
     status: DocumentStatus
     callback_url: Optional[str] = None
+    is_archive: Optional[bool] = False
+    total_enqueued: Optional[int] = 1
+    documents: Optional[List[BatchUploadItem]] = None
 
     model_config = ConfigDict(from_attributes=True)
-
-
-class BatchUploadItem(BaseModel):
-    document_id: str
-    filename: str
-    status: DocumentStatus
 
 
 class BatchUploadResponse(BaseModel):

@@ -113,9 +113,12 @@ app.include_router(documents.router)
 
 @app.get("/health", tags=["Health"], summary="Service Health Check")
 async def health_check():
-    """Liveness and readiness check for container orchestrators."""
+    """Liveness and readiness check for container orchestrators and client frontends."""
     return {
         "status": "healthy",
         "app": settings.APP_NAME,
         "environment": settings.APP_ENV,
+        "classifier_mode": settings.CLASSIFIER_MODE.upper(),
+        "vlm_model": settings.VLM_MODEL_NAME if settings.CLASSIFIER_MODE.lower() == "vlm" else None,
+        "llm_model": settings.LLAMA_MODEL_NAME if settings.CLASSIFIER_MODE.lower() == "llm" else None,
     }

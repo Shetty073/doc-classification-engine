@@ -30,12 +30,14 @@ The platform automates the ingestion, text extraction, image quality auditing, a
                    │ (React Dashboard, Core Banking Systems, SDK) │
                    └──────────────────────┬───────────────────────┘
                                           │ HTTPS (Bearer JWT)
+                                          │ Supports PDF, PNG, JPG & ZIP Dossiers
                                           ▼
                    ┌──────────────────────────────────────────────┐
                    │             FastAPI Web Engine               │
                    │  - SecurityHeaders (HSTS, CSP, X-Frame: DENY)│
                    │  - TrustedHost & CORS Allowed Origins        │
                    │  - SlowAPI Rate Limiter (IP/Redis)           │
+                   │  - Safe ZIP Extraction Engine (Zip Slip/Bomb)│
                    │  - OAuth2 Password Auth with JWT (HS256)     │
                    └──────────────┬────────────────┬──────────────┘
                                   │                │
@@ -51,15 +53,12 @@ The platform automates the ingestion, text extraction, image quality auditing, a
      │       ARQ Worker Node        │                           │
      │  - Quality Diagnostic Engine ├───────────────────────────┘
      │  - PyMuPDF / PaddleOCR Engine│ Updates status: PENDING -> PROCESSING -> COMPLETED / FAILED
-     │  - LLM Classification Client │ Dispatches Webhook callbacks
+     │  - Aadhaar UIDAI Masking     │ Dispatches Webhook callbacks
+     │  - Dual Classifier (LLM/VLM) │
      └──────────────┬───────────────┘
-                    │ HTTP POST /v1/chat/completions
-                    ▼
-     ┌──────────────────────────────┐
-     │   Local llama.cpp Server     │
-     │      (localhost:8080)        │
-     │  Model: Llama-3.2-3B-Instruct│
-     └──────────────────────────────┘
+                    │
+                    ├───[ CLASSIFIER_MODE=llm ]───► Local llama.cpp LLM (Llama-3.2-3B)
+                    └───[ CLASSIFIER_MODE=vlm ]───► Multimodal VLM Server (Qwen2-VL)
 ```
 
 > 📖 **Deep Dive:** For the complete component interactions, sequence diagrams, and ER models, see [ARCHITECTURE.md](file:///f:/doc-classification-engine/ARCHITECTURE.md).
@@ -127,7 +126,11 @@ npm run dev
   * `paddlepaddle-gpu` (CUDA-accelerated on NVIDIA RTX GPUs) with automated runtime fallback to CPU.
   * `paddleocr` (v2.10) with textline orientation detection.
   * `PyMuPDF` (`pymupdf`) digital text extraction + page rasterization (150 DPI).
-* **LLM Inference:** `Llama-3.2-3B-Instruct` served locally via [`llama.cpp`](https://github.com/ggerganov/llama.cpp)'s OpenAI-compatible HTTP server (`http://localhost:8080/v1/chat/completions`).
+* **AI Model Inference (Dual-Engine LLM / VLM):** 
+  * **LLM Mode (`CLASSIFIER_MODE=llm`):** `Llama-3.2-3B-Instruct` served locally via [`llama.cpp`](https://github.com/ggerganov/llama.cpp)'s OpenAI-compatible HTTP server (`http://localhost:8080/v1/chat/completions`).
+  * **VLM Mode (`CLASSIFIER_MODE=vlm`):** Multimodal Vision-Language Models (e.g. `Qwen2-VL-7B-Instruct`, `Llama-3.2-11B-Vision`) receiving base64 rendered document pages and OCR hints directly via OpenAI-compatible vision completions.
+  * **Engine Selection Flag:** Switch between LLM and VLM dynamically via `CLASSIFIER_MODE=llm` or `CLASSIFIER_MODE=vlm` in your `.env` file.
+* **ZIP Archive Extraction Engine:** Safe in-flight extraction of `.zip` dossier packages with Zip Slip path traversal mitigation, decompression ratio & bomb guards, and automated multi-document queueing.
 * **Security & Auth:** OAuth2 Password Bearer flow, PyJWT (HS256), Passlib (Bcrypt), SlowAPI rate limiting (IP/Redis), TrustedHostMiddleware, Strict-Transport-Security, and Content Security Policy.
 
 ---
@@ -215,12 +218,54 @@ docker compose -f docker-compose.full.yml up -d --build
 | `POST` | `/token` | OAuth2 Password Login (returns JWT) | No |
 | `POST` | `/register` | Register New Operator User | Admin |
 | `GET` | `/me` | Get Current Authenticated User Profile | Yes |
-| `POST` | `/upload` | Upload Single Document (PDF/Image) | Yes |
-| `POST` | `/upload-batch` | Upload Batch Documents (up to 20 files) | Yes |
+| `POST` | `/upload` | Upload Document or ZIP Archive (auto-extracted) | Yes |
+| `POST` | `/upload-batch` | Upload Batch Documents (including ZIP archives) | Yes |
 | `GET` | `/documents/{reference_id}` | List All Documents (in-flight & completed) | Yes |
 | `GET` | `/documents/{reference_id}/status`| Application Processing Status Summary | Yes |
 | `GET` | `/documents/download/{document_id}`| Secure Document File Download | Yes |
-| `GET` | `/health` | Service Liveness & Health Check | No |
+| `GET` | `/health` | Service Health & Classifier Mode (`LLM` or `VLM`) | No |
+
+---
+
+## 👁️ Vision-Language Model (VLM) vs LLM Dual Mode
+
+The classification engine allows institutions to choose between text-based Large Language Models (LLM) and multimodal Vision-Language Models (VLM) via a single environment flag:
+
+### 1. Configure Classifier Mode in `.env`:
+```env
+# Choose "llm" (text inference via llama.cpp) or "vlm" (visual multimodal inference)
+CLASSIFIER_MODE=vlm
+
+# When CLASSIFIER_MODE=llm:
+LLAMA_CPP_URL=http://localhost:8080/v1/chat/completions
+LLAMA_MODEL_NAME=Llama-3.2-3B-Instruct
+
+# When CLASSIFIER_MODE=vlm:
+VLM_URL=http://localhost:8080/v1/chat/completions
+VLM_MODEL_NAME=Qwen2-VL-7B-Instruct
+VLM_REQUEST_TIMEOUT_SECONDS=60.0
+VLM_MAX_IMAGE_PAGES=3
+```
+
+### 2. How VLM Inference Operates:
+* **PDFs & Images Rendered to Visual Embeddings:** When a document is processed, `PyMuPDF` renders the key pages (150 DPI) into base64 images without writing temporary files to disk.
+* **OpenAI Vision Specification:** Requests are dispatched to `VLM_URL` using standard `image_url` data URIs along with OCR hints and the comprehensive 42-class RBI banking prompt.
+* **High-Availability Fallback:** If the VLM server is offline or busy, the pipeline falls back gracefully to OCR text heuristics to ensure banking operational continuity.
+* **UI Transparency:** The active engine mode is prominently displayed on the Enterprise Dashboard header badge (`MODEL: VLM (Vision)` or `MODEL: LLM (Text)`).
+
+---
+
+## 📦 ZIP Archive Dossier Ingestion & Security
+
+Borrower dossiers often arrive as compressed `.zip` packages containing multiple files (e.g. PAN, Aadhaar, Bank Statement, and ITR).
+
+### Features:
+1. **Direct Upload to `/upload` and `/upload-batch`:** Upload `.zip` files directly through cURL, Postman, or the drag-and-drop dashboard.
+2. **Atomic Ingestion:** Every valid document inside the `.zip` is extracted, saved with an isolated document ID, and scheduled for parallel background worker processing.
+3. **Enterprise Security Hardening:**
+   * **Zip Slip Mitigation:** Blocks malicious relative paths (`../../evil.sh`) using absolute common path validation.
+   * **Zip Bomb Protection:** Rejects archives whose uncompressed payload exceeds `MAX_ARCHIVE_UNCOMPRESSED_BYTES` (default 200MB).
+   * **System Metadata Filtering:** Automatically ignores macOS metadata (`__MACOSX/`, `.DS_Store`), Windows thumbnails (`Thumbs.db`), and hidden files.
 
 ---
 

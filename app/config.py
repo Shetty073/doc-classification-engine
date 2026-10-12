@@ -35,10 +35,18 @@ class Settings(BaseSettings):
     REDIS_DB: int = 0
     REDIS_PASSWORD: str | None = None
 
-    # LLM Inference (llama.cpp server)
+    # Classifier Mode & Model Inference
+    # CLASSIFIER_MODE can be "llm" (text via llama.cpp) or "vlm" (vision-language via vision endpoint)
+    CLASSIFIER_MODE: str = "llm"
     LLAMA_CPP_URL: str = "http://localhost:8080/v1/chat/completions"
     LLAMA_MODEL_NAME: str = "Llama-3.2-3B-Instruct"
     LLM_REQUEST_TIMEOUT_SECONDS: float = 60.0
+
+    # Vision Language Model (VLM) Settings
+    VLM_URL: str = "http://localhost:8080/v1/chat/completions"
+    VLM_MODEL_NAME: str = "Qwen2-VL-7B-Instruct"
+    VLM_REQUEST_TIMEOUT_SECONDS: float = 60.0
+    VLM_MAX_IMAGE_PAGES: int = 3
 
     # OCR Settings
     PADDLE_OCR_USE_GPU: bool = False
@@ -47,6 +55,20 @@ class Settings(BaseSettings):
     # File Storage & Limits
     UPLOAD_DIR: str = "./uploads"
     MAX_FILE_SIZE_BYTES: int = 100 * 1024 * 1024  # 100 MB for large banking dossiers
+    MAX_ARCHIVE_UNCOMPRESSED_BYTES: int = 200 * 1024 * 1024  # 200 MB max uncompressed for zip archives
+    DOCUMENT_EXTENSIONS: List[str] = [
+        ".pdf",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".webp",
+        ".tiff",
+        ".tif",
+        ".bmp",
+    ]
+    ARCHIVE_EXTENSIONS: List[str] = [
+        ".zip",
+    ]
     ALLOWED_EXTENSIONS: List[str] = [
         ".pdf",
         ".png",
@@ -56,6 +78,7 @@ class Settings(BaseSettings):
         ".tiff",
         ".tif",
         ".bmp",
+        ".zip",
     ]
 
     # Security Controls

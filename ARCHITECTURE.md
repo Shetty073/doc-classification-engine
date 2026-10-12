@@ -24,9 +24,10 @@ flowchart TB
 
     subgraph APILayer ["3. FastAPI Application Engine (Async)"]
         AuthRouter["auth.py<br/>POST /token<br/>POST /register<br/>GET /me"]
-        DocRouter["documents.py<br/>POST /upload<br/>POST /upload-batch<br/>GET /documents/{ref_id}<br/>GET /documents/{ref_id}/status<br/>GET /documents/download/{id}"]
+        DocRouter["documents.py<br/>POST /upload (PDF, Image, ZIP)<br/>POST /upload-batch (PDF, Image, ZIP)<br/>GET /documents/{ref_id}<br/>GET /documents/{ref_id}/status<br/>GET /documents/download/{id}"]
         HealthRouter["main.py<br/>GET /health"]
         StorageEngine["Disk Storage Streamer<br/>(Sanitizer, Size Cap 100MB, Path Traversal Guard)"]
+        ZipExtractor["Safe Archive Unpacker (app/utils/archive.py)<br/>(Zip Slip Guard, 200MB Decompression Cap)"]
         ARQDispatcher["ARQ Pool Producer<br/>(arq.create_pool -> Redis)"]
     end
 
@@ -52,10 +53,11 @@ flowchart TB
             UIDAIMasker["Aadhaar Privacy Masker (app/utils/masking.py)<br/>(Redacts 8 digits of UIDAI numbers)"]
         end
 
-        subgraph ClassifierSubsystem ["LLM Inference Engine"]
+        subgraph ClassifierSubsystem ["Dual AI Inference Engine (LLM / VLM)"]
+            ModeBranch{"CLASSIFIER_MODE?<br/>(from .env)"}
+            LLMInference["LLM Pipeline (Text-Based)<br/>Llama-3.2-3B via llama.cpp<br/>POST /v1/chat/completions"]
+            VLMInference["VLM Pipeline (Multimodal Vision)<br/>Qwen2-VL via OpenAI Vision API<br/>Base64 Page Images + OCR Hint"]
             PromptBuilder["Prompt Constructor<br/>(42-Class RBI Banking Taxonomy + JSON Schema)"]
-            HTTPXClient["httpx.AsyncClient (Timeout: 60s)"]
-            LlamaServer["llama.cpp HTTP Server 8080<br/>Model: Llama-3.2-3B-Instruct<br/>POST /v1/chat/completions"]
             PostReconciliation["Rule Reconciliation & Fallback Engine<br/>- MCA Incorporation vs PAN<br/>- Udyam vs Board Resolution<br/>- MOA/AOA vs Business Registration"]
             EntityExtractor["Entity Extractor (app/utils/entity_extractor.py)<br/>- PAN, GSTIN, CIN, Dates, Names"]
         end
@@ -240,4 +242,6 @@ stateDiagram-v2
 | **CORS Infiltration** | Strict whitelist: `http://localhost:5173`, `http://localhost:3000`, `http://localhost:8000` (no wildcard `*`). | [app/main.py](file:///f:/doc-classification-engine/app/main.py) |
 | **Unauthorized Data Access** | OAuth2 Password Flow with PyJWT cryptographically signed tokens (HS256). | [app/security.py](file:///f:/doc-classification-engine/app/security.py) |
 | **Unbounded File Bomb** | Chunked streaming write that aborts and deletes files exceeding `MAX_FILE_SIZE_BYTES` (100MB). | [app/routers/documents.py](file:///f:/doc-classification-engine/app/routers/documents.py) |
-| **PII / UIDAI Compliance** | Automated masking of Aadhaar digits (first 8 digits masked) before raw OCR text is persisted. | [app/utils/masking.py](file:///f:/doc-classification-engine/app/utils/masking.py) |
+| **Zip Slip Traversal Attack** | Strict canonical target path verification against destination root (`os.path.commonpath`). | [app/utils/archive.py](file:///f:/doc-classification-engine/app/utils/archive.py) |
+| **Zip Bomb Decompression** | Pre-extraction size inspection capping uncompressed bytes at `MAX_ARCHIVE_UNCOMPRESSED_BYTES` (200MB). | [app/utils/archive.py](file:///f:/doc-classification-engine/app/utils/archive.py) |
+| **PII / UIDAI Compliance** | Automated masking of Aadhaar digits (first 8 digits masked) before raw OCR text is persisted. | [app/utils/redactor.py](file:///f:/doc-classification-engine/app/utils/redactor.py) |

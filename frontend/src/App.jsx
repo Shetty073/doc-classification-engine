@@ -173,11 +173,15 @@ export default function App() {
     if (!files || files.length === 0) return;
     setUploading(true);
 
-    const queueItems = Array.from(files).map(f => ({
-      name: f.name,
-      size: (f.size / 1024).toFixed(1) + ' KB',
-      status: 'Uploading...'
-    }));
+    const queueItems = Array.from(files).map(f => {
+      const isZip = f.name.toLowerCase().endsWith('.zip');
+      return {
+        name: f.name,
+        size: (f.size / 1024).toFixed(1) + ' KB',
+        status: isZip ? 'Unpacking & Ingesting ZIP...' : 'Uploading...',
+        isZip: isZip
+      };
+    });
     setUploadQueue(queueItems);
 
     try {
@@ -424,8 +428,15 @@ export default function App() {
           <div className="header-divider" />
 
           <div className="system-status-indicator">
-            <span className={`status-dot ${systemHealth?.status === 'ok' ? '' : 'offline'}`} />
-            <span>Service Node: {systemHealth?.status === 'ok' ? 'Online' : 'Degraded'}</span>
+            <span className={`status-dot ${(systemHealth?.status === 'ok' || systemHealth?.status === 'healthy') ? '' : 'offline'}`} />
+            <span>Service Node: {(systemHealth?.status === 'ok' || systemHealth?.status === 'healthy') ? 'Online' : 'Degraded'}</span>
+          </div>
+
+          <div className="header-divider" />
+
+          <div className={`model-mode-pill ${systemHealth?.classifier_mode === 'VLM' ? 'vlm-active' : 'llm-active'}`}>
+            <Layers size={13} />
+            <span>MODEL: {systemHealth?.classifier_mode === 'VLM' ? 'VLM (Vision)' : 'LLM (Text)'}</span>
           </div>
         </div>
 
@@ -582,7 +593,7 @@ export default function App() {
               ref={fileInputRef}
               type="file"
               multiple
-              accept=".pdf,.png,.jpg,.jpeg,.tiff"
+              accept=".pdf,.png,.jpg,.jpeg,.webp,.tiff,.tif,.bmp,.zip"
               style={{ display: 'none' }}
               onChange={e => {
                 if (e.target.files && e.target.files.length > 0) {
@@ -593,13 +604,14 @@ export default function App() {
             />
             <div>
               <p className="dropzone-text-primary">Click to select documents or drag & drop files here</p>
-              <p className="dropzone-text-secondary">Direct support for PDF, PNG, JPG, and multi-page corporate filings</p>
+              <p className="dropzone-text-secondary">Direct support for PDF, PNG, JPG, and ZIP dossier packages (auto-extracted)</p>
             </div>
             <div className="dropzone-badges">
               <span className="drop-badge">PDF</span>
               <span className="drop-badge">PNG</span>
               <span className="drop-badge">JPG</span>
-              <span className="drop-badge">MAX 50MB</span>
+              <span className="drop-badge zip-badge">ZIP ARCHIVE</span>
+              <span className="drop-badge">MAX 100MB</span>
             </div>
           </div>
 

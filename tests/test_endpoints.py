@@ -29,6 +29,11 @@ def test_security_headers_present(client):
     assert "Content-Security-Policy" in headers
     assert "X-Process-Time" in headers
 
+    # Verify classifier_mode is returned in health payload
+    data = response.json()
+    assert "classifier_mode" in data
+    assert data["classifier_mode"] in ("LLM", "VLM")
+
 
 def test_sanitize_filename():
     assert sanitize_filename("../../../etc/passwd") == "passwd"
